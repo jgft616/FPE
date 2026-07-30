@@ -1,14 +1,12 @@
 --[[
     FPE:S
     作者：jgft616
-    功能：最大体力 + 体力恢复 + 通行证 + 防拉回 + 透视（可开关） + 队伍检测（可开关） + 夜视（可开关）
-    界面：可滚动、可缩小悬浮球
-]]
+    功能：最大体力 + 体力恢复 + 通行证 + 防拉回 + 透视（0.1秒刷新） + 队伍检测 + 夜视 + 电立室门删除 + 皮肤商店删除（仅夜晚有效提示）
+--]]
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local CoreGui = game:GetService("CoreGui")
 local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
 local LP = Players.LocalPlayer
@@ -26,7 +24,7 @@ local function notify(title, msg)
     pcall(function() StarterGui:SetCore("SendNotification", {Title = title, Text = msg, Duration = 3}) end)
 end
 
--- ==================== 功能状态 ====================
+-- 功能状态
 local MaxStaminaEnabled = false
 local MaxStaminaValue = 99999
 local StaminaRecoveryEnabled = false
@@ -36,7 +34,7 @@ local ESPEnabled = false
 local TeamCheckEnabled = true
 local NightVisionEnabled = false
 
--- ==================== 夜视系统 ====================
+-- 夜视
 local function toggleNightVision(on)
     NightVisionEnabled = on
     if on then
@@ -49,7 +47,6 @@ local function toggleNightVision(on)
         notify("夜视", "已关闭")
     end
 end
-
 spawn(function()
     while task.wait(1) do
         if NightVisionEnabled then
@@ -61,7 +58,7 @@ spawn(function()
     end
 end)
 
--- ==================== 队伍检测（可开关） ====================
+-- 队伍检测
 local function IsTeammate(player)
     if player == LP then return true end
     if not TeamCheckEnabled then return false end
@@ -85,7 +82,7 @@ local function toggleTeamCheck(on)
     if ESPEnabled then refreshESP() end
 end
 
--- ==================== 透视系统（可开关） ====================
+-- 透视系统
 local espObjects = {}
 
 local function clearESP()
@@ -99,8 +96,14 @@ end
 local function refreshESP()
     if not ESPEnabled then return end
     for player, data in pairs(espObjects) do
-        if not player.Parent or not player.Character then
-            pcall(function() data.Highlight:Destroy() end)
+        local hl = data.Highlight
+        local char = player.Character
+        if not player.Parent or not char then
+            pcall(function() hl:Destroy() end)
+            pcall(function() data.Billboard:Destroy() end)
+            espObjects[player] = nil
+        elseif hl and (not hl.Adornee or hl.Adornee ~= char) then
+            pcall(function() hl:Destroy() end)
             pcall(function() data.Billboard:Destroy() end)
             espObjects[player] = nil
         end
@@ -136,13 +139,24 @@ local function refreshESP()
 end
 
 spawn(function()
-    while task.wait(1) do
+    while task.wait(0.1) do
         pcall(refreshESP)
     end
 end)
 
+local function onCharacterAdded(player)
+    pcall(refreshESP)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LP then
+        player.CharacterAdded:Connect(function() onCharacterAdded(player) end)
+    end
+end
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function() onCharacterAdded(player) end)
+end)
 LP.CharacterAdded:Connect(function()
-    task.wait(0.5)
     pcall(refreshESP)
 end)
 
@@ -150,14 +164,14 @@ local function toggleESP(on)
     ESPEnabled = on
     if on then
         refreshESP()
-        notify("透视", "✅ 已开启")
+        notify("透视", "✅ 已开启（0.1秒刷新，重生立即显示）")
     else
         clearESP()
         notify("透视", "已关闭")
     end
 end
 
--- ==================== 防拉回（阈值150） ====================
+-- 防拉回
 local PULLBACK_THRESHOLD = 150
 spawn(function()
     local lastPosition = nil
@@ -180,16 +194,12 @@ spawn(function()
     end
 end)
 
--- ==================== 应用所有设置（关闭时不做任何修改） ====================
+-- 应用设置
 local function applyAllSettings()
     local char = LP.Character
     if char then
-        if MaxStaminaEnabled then
-            pcall(function() char:SetAttribute("MaxStamina", MaxStaminaValue) end)
-        end
-        if StaminaRecoveryEnabled then
-            pcall(function() char:SetAttribute("Stamina", StaminaRecoveryValue) end)
-        end
+        if MaxStaminaEnabled then pcall(function() char:SetAttribute("MaxStamina", MaxStaminaValue) end) end
+        if StaminaRecoveryEnabled then pcall(function() char:SetAttribute("Stamina", StaminaRecoveryValue) end) end
     end
     for attrName, enabled in pairs(PassesEnabled) do
         if enabled then pcall(function() LP:SetAttribute(attrName, true) end) end
@@ -197,60 +207,94 @@ local function applyAllSettings()
 end
 
 LP.CharacterAdded:Connect(function() task.wait(0.1); applyAllSettings() end)
+spawn(function() while task.wait(0.5) do applyAllSettings() end end)
 
-spawn(function()
-    while task.wait(0.5) do
-        applyAllSettings()
-    end
-end)
-
--- ==================== 功能函数 ====================
+-- 功能控制
 local function toggleMaxStamina(on)
     MaxStaminaEnabled = on
-    if not on then
-        pcall(function()
-            local char = LP.Character
-            if char then char:SetAttribute("MaxStamina", 100) end
-        end)
-    end
+    if not on then pcall(function() local char = LP.Character; if char then char:SetAttribute("MaxStamina", 100) end end) end
     applyAllSettings()
     notify("最大体力", on and "✅ 已开启" or "已关闭")
 end
-
-local function setMaxStamina(val)
-    local num = tonumber(val)
-    if not num then return end
-    MaxStaminaValue = num
-    if MaxStaminaEnabled then applyAllSettings() end
-end
-
+local function setMaxStamina(val) MaxStaminaValue = tonumber(val) or MaxStaminaValue; if MaxStaminaEnabled then applyAllSettings() end end
 local function toggleStaminaRecovery(on)
-    StaminaRecoveryEnabled = on
-    applyAllSettings()
+    StaminaRecoveryEnabled = on; applyAllSettings()
     notify("体力恢复", on and "✅ 已开启" or "已关闭")
 end
+local function setStaminaRecovery(val) StaminaRecoveryValue = tonumber(val) or StaminaRecoveryValue; if StaminaRecoveryEnabled then applyAllSettings() end end
+local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "✅ 已获取: " .. name) end
 
-local function setStaminaRecovery(val)
-    local num = tonumber(val)
-    if not num then return end
-    StaminaRecoveryValue = num
-    if StaminaRecoveryEnabled then applyAllSettings() end
+-- ==================== 门/皮肤商店删除 ====================
+local function deleteElectricRoomDoor()
+    local doors = workspace:FindFirstChild("Area")
+    if doors then doors = doors:FindFirstChild("Map") end
+    if doors then doors = doors:FindFirstChild("Doors") end
+    if not doors then
+        notify("删除失败", "未找到 Doors")
+        return
+    end
+    local deletedCount = 0
+    local children = doors:GetChildren()
+    for _, child in ipairs(children) do
+        local mesh = child:FindFirstChild("Mesh")
+        if mesh then
+            pcall(function() child:Destroy() end)
+            deletedCount = deletedCount + 1
+        end
+    end
+    if deletedCount > 0 then
+        notify("电立室门删除", "所有电力室门已删除")
+    else
+        notify("电立室门删除", "未找到包含 Mesh 的门")
+    end
 end
 
-local function getPass(name, attrName)
-    PassesEnabled[attrName] = true
-    applyAllSettings()
-    notify("通行证", "✅ 已获取: " .. name)
+local function deleteSkinShop()
+    local map = workspace:FindFirstChild("Area")
+    if map then map = map:FindFirstChild("Map") end
+    if not map then
+        notify("皮肤商店删除", "未找到 Area/Map")
+        return
+    end
+
+    -- 删除 SkinSelectionShop 下的对象
+    local skinShop = map:FindFirstChild("SkinSelectionShop")
+    if skinShop then
+        local locker = skinShop:FindFirstChild("BaseLocker")
+        if locker then pcall(function() locker:Destroy() end) end
+        local shelf = skinShop:FindFirstChild("Shelf")
+        if shelf then pcall(function() shelf:Destroy() end) end
+    end
+
+    -- 删除 Doors/StorageDoor 下的 DoubleDoor/DoubleDoor2
+    local doors = map:FindFirstChild("Doors")
+    if doors then
+        local storageDoor = doors:FindFirstChild("StorageDoor")
+        if storageDoor then
+            local dd2 = storageDoor:FindFirstChild("DoubleDoor2")
+            if dd2 then pcall(function() dd2:Destroy() end) end
+            local dd = storageDoor:FindFirstChild("DoubleDoor")
+            if dd then pcall(function() dd:Destroy() end) end
+        end
+    end
+
+    -- 删除碰撞盒
+    local collisions = map:FindFirstChild("CollisionBoxes")
+    if collisions then
+        local col = collisions:FindFirstChild("StorageDoorCollision")
+        if col then pcall(function() col:Destroy() end) end
+    end
+
+    notify("皮肤商店删除", "✅ 已删除所有皮肤商店相关对象（只有夜晚才有用）")
 end
 
--- ==================== 原生UI ====================
+-- ==================== UI ====================
 local guiParent = LP:WaitForChild("PlayerGui")
 local gui = Instance.new("ScreenGui", guiParent)
 gui.Name = "FPES_Final"; gui.ResetOnSpawn = false
 
 local main = Instance.new("Frame", gui)
-main.Size = UDim2.new(0, 260, 0, 300)
-main.Position = UDim2.new(0.5, -130, 0.45, -150)
+main.Size = UDim2.new(0, 260, 0, 370); main.Position = UDim2.new(0.5, -130, 0.45, -185)
 main.BackgroundColor3 = C.Bg; main.BorderSizePixel = 0; main.Active = true
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
 
@@ -259,9 +303,9 @@ tb.Size = UDim2.new(1, 0, 0, 36); tb.BackgroundColor3 = C.Bg2; tb.BorderSizePixe
 Instance.new("UICorner", tb).CornerRadius = UDim.new(0, 10)
 
 local title = Instance.new("TextLabel", tb)
-title.Text = "FPE:S  |  作者: jgft616"
-title.Font = Enum.Font.GothamBold; title.TextSize = 13; title.TextColor3 = C.Text
-title.BackgroundTransparency = 1; title.Position = UDim2.new(0, 12, 0, 0); title.Size = UDim2.new(1, -70, 1, 0); title.TextXAlignment = 0
+title.Text = "FPE:S  |  作者: jgft616"; title.Font = Enum.Font.GothamBold; title.TextSize = 13
+title.TextColor3 = C.Text; title.BackgroundTransparency = 1
+title.Position = UDim2.new(0, 12, 0, 0); title.Size = UDim2.new(1, -70, 1, 0); title.TextXAlignment = 0
 
 local userLabel = Instance.new("TextLabel", tb)
 userLabel.Text = UserName; userLabel.Font = Enum.Font.Gotham; userLabel.TextSize = 9; userLabel.TextColor3 = C.Gray
@@ -290,10 +334,7 @@ minBtn.MouseButton1Click:Connect(function() minimized = true; main.Visible = fal
 miniDot.MouseButton1Click:Connect(function() minimized = false; main.Visible = true; miniDot.Visible = false end)
 closeBtn.MouseButton1Click:Connect(function()
     MaxStaminaEnabled = false; StaminaRecoveryEnabled = false
-    pcall(function()
-        local char = LP.Character
-        if char then char:SetAttribute("MaxStamina", 100) end
-    end)
+    pcall(function() local char = LP.Character; if char then char:SetAttribute("MaxStamina", 100) end end)
     for k in pairs(PassesEnabled) do PassesEnabled[k] = false end
     ESPEnabled = false; clearESP()
     if NightVisionEnabled then toggleNightVision(false) end
@@ -309,42 +350,29 @@ scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
 local yPos = 0
 local function addControl(child, customHeight)
     local h = customHeight or 26
-    child.Parent = scroll
-    child.Position = UDim2.new(0, 0, 0, yPos)
-    yPos = yPos + h + 4
+    child.Parent = scroll; child.Position = UDim2.new(0, 0, 0, yPos); yPos = yPos + h + 4
 end
-
 local function addLabel(text)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, 18); lbl.BackgroundTransparency = 1
-    lbl.Text = text; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 12; lbl.TextColor3 = C.Acc
-    lbl.TextXAlignment = 0
+    local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1, 0, 0, 18); lbl.BackgroundTransparency = 1
+    lbl.Text = text; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 12; lbl.TextColor3 = C.Acc; lbl.TextXAlignment = 0
     addControl(lbl, 18)
 end
-
 local function addToggleWithInput(labelText, defaultVal, toggleCallback, inputCallback)
     local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
-    local label = Instance.new("TextLabel", frame)
-    label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
-    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
-    label.Size = UDim2.new(0, 95, 1, 0); label.TextXAlignment = 0
-    local input = Instance.new("TextBox", frame)
-    input.Size = UDim2.new(1, -145, 0, 22); input.Position = UDim2.new(0, 97, 0, 2)
-    input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal)
-    input.Font = Enum.Font.Gotham; input.TextSize = 10; input.TextColor3 = C.Text
-    input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
+    local label = Instance.new("TextLabel", frame); label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1; label.Size = UDim2.new(0, 95, 1, 0); label.TextXAlignment = 0
+    local input = Instance.new("TextBox", frame); input.Size = UDim2.new(1, -145, 0, 22); input.Position = UDim2.new(0, 97, 0, 2)
+    input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal); input.Font = Enum.Font.Gotham; input.TextSize = 10
+    input.TextColor3 = C.Text; input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
     Instance.new("UICorner", input).CornerRadius = UDim.new(0, 4)
-    local switch = Instance.new("TextButton", frame)
-    switch.Size = UDim2.new(0, 38, 0, 18); switch.Position = UDim2.new(1, -42, 0.5, -9)
+    local switch = Instance.new("TextButton", frame); switch.Size = UDim2.new(0, 38, 0, 18); switch.Position = UDim2.new(1, -42, 0.5, -9)
     switch.BackgroundColor3 = C.Gray; switch.Text = ""; switch.AutoButtonColor = false
     Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
-    local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 14, 0, 14)
-    knob.Position = UDim2.new(0, 2, 0.5, -7); knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 14, 0, 14); knob.Position = UDim2.new(0, 2, 0.5, -7)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
     local state = false
     switch.MouseButton1Click:Connect(function()
-        state = not state
-        switch.BackgroundColor3 = state and C.Green or C.Gray
+        state = not state; switch.BackgroundColor3 = state and C.Green or C.Gray
         knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
         if toggleCallback then toggleCallback(state) end
         if state and inputCallback then inputCallback(input.Text) end
@@ -354,13 +382,11 @@ local function addToggleWithInput(labelText, defaultVal, toggleCallback, inputCa
     end)
     addControl(frame, 26)
 end
-
 local function addToggle(labelText, default, callback)
     local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
     local label = Instance.new("TextLabel", frame); label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 12
     label.TextColor3 = C.Text; label.BackgroundTransparency = 1; label.Size = UDim2.new(0, 140, 1, 0); label.TextXAlignment = 0
-    local switch = Instance.new("TextButton", frame)
-    switch.Size = UDim2.new(0, 40, 0, 20); switch.Position = UDim2.new(1, -44, 0.5, -10)
+    local switch = Instance.new("TextButton", frame); switch.Size = UDim2.new(0, 40, 0, 20); switch.Position = UDim2.new(1, -44, 0.5, -10)
     switch.BackgroundColor3 = default and C.Green or C.Gray; switch.Text = ""; switch.AutoButtonColor = false
     Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
     local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 16, 0, 16)
@@ -374,7 +400,6 @@ local function addToggle(labelText, default, callback)
     end)
     addControl(frame, 26)
 end
-
 local function addButton(text, callback)
     local btn = Instance.new("TextButton"); btn.Size = UDim2.new(1, 0, 0, 30); btn.BackgroundColor3 = C.Acc
     btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 12; btn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -389,16 +414,17 @@ end
 addLabel("体力")
 addToggleWithInput("最大体力", 99999, toggleMaxStamina, setMaxStamina)
 addToggleWithInput("体力恢复", 99999, toggleStaminaRecovery, setStaminaRecovery)
-
 addLabel("视觉")
 addToggle("透视开关", false, toggleESP)
 addToggle("队伍检测", true, toggleTeamCheck)
 addToggle("夜视", false, toggleNightVision)
-
 addLabel("通行证")
 addButton("获取爱丽丝通行证", function() getPass("爱丽丝通行证", "OwnsAlicePass") end)
 addButton("获取 VIP", function() getPass("VIP", "HasVIP") end)
 addButton("获取交换通行证", function() getPass("交换通行证", "HasSwap") end)
+addLabel("删除")
+addButton("电立室门删除", deleteElectricRoomDoor)
+addButton("皮肤商店删除（只有夜晚才有用）", deleteSkinShop)
 
 -- 拖动系统
 local dragging, dragStart, startPos
@@ -416,6 +442,7 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 local dotDragging, dotStart, dotStartPos
+local screenSize = workspace.CurrentCamera.ViewportSize
 miniDot.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dotDragging = true; dotStart = input.Position; dotStartPos = miniDot.Position
@@ -425,8 +452,12 @@ end)
 UserInputService.InputChanged:Connect(function(input)
     if dotDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local delta = input.Position - dotStart
-        miniDot.Position = UDim2.new(dotStartPos.X.Scale, dotStartPos.X.Offset + delta.X, dotStartPos.Y.Scale, dotStartPos.Y.Offset + delta.Y)
+        local newX = dotStartPos.X.Offset + delta.X
+        local newY = dotStartPos.Y.Offset + delta.Y
+        newX = math.clamp(newX, 0, screenSize.X - miniDot.AbsoluteSize.X)
+        newY = math.clamp(newY, 0, screenSize.Y - miniDot.AbsoluteSize.Y)
+        miniDot.Position = UDim2.new(0, newX, 0, newY)
     end
 end)
 
-notify("FPE:S", "体力 | 视觉 | 通行证 | 防拉回")
+notify("FPE:S", "体力 | 视觉 | 通行证 | 防拉回 | 删除")
