@@ -1,0 +1,432 @@
+--[[
+    FPE:S
+    作者：jgft616
+    功能：最大体力 + 体力恢复 + 通行证 + 防拉回 + 透视（可开关） + 队伍检测（可开关） + 夜视（可开关）
+    界面：可滚动、可缩小悬浮球
+]]
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local StarterGui = game:GetService("StarterGui")
+local Lighting = game:GetService("Lighting")
+local LP = Players.LocalPlayer
+
+local UserName = LP.Name
+
+local C = {
+    Bg = Color3.fromRGB(18, 18, 25), Bg2 = Color3.fromRGB(25, 25, 35),
+    Acc = Color3.fromRGB(255, 105, 180), Text = Color3.fromRGB(220, 220, 240),
+    Gray = Color3.fromRGB(140, 140, 160), Red = Color3.fromRGB(255, 80, 80),
+    Green = Color3.fromRGB(80, 200, 80),
+}
+
+local function notify(title, msg)
+    pcall(function() StarterGui:SetCore("SendNotification", {Title = title, Text = msg, Duration = 3}) end)
+end
+
+-- ==================== 功能状态 ====================
+local MaxStaminaEnabled = false
+local MaxStaminaValue = 99999
+local StaminaRecoveryEnabled = false
+local StaminaRecoveryValue = 99999
+local PassesEnabled = { OwnsAlicePass = false, HasVIP = false, HasSwap = false }
+local ESPEnabled = false
+local TeamCheckEnabled = true
+local NightVisionEnabled = false
+
+-- ==================== 夜视系统 ====================
+local function toggleNightVision(on)
+    NightVisionEnabled = on
+    if on then
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        Lighting.Brightness = 3
+        notify("夜视", "✅ 已开启")
+    else
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+        Lighting.Brightness = 1
+        notify("夜视", "已关闭")
+    end
+end
+
+spawn(function()
+    while task.wait(1) do
+        if NightVisionEnabled then
+            pcall(function()
+                Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+                Lighting.Brightness = 3
+            end)
+        end
+    end
+end)
+
+-- ==================== 队伍检测（可开关） ====================
+local function IsTeammate(player)
+    if player == LP then return true end
+    if not TeamCheckEnabled then return false end
+    if LP.Team and player.Team then return LP.Team == player.Team end
+    local char = player.Character
+    if char then
+        local students = workspace:FindFirstChild("Students")
+        local teachers = workspace:FindFirstChild("Teachers")
+        local myChar = LP.Character
+        if students and teachers and myChar then
+            if char:IsDescendantOf(students) and myChar:IsDescendantOf(students) then return true end
+            if char:IsDescendantOf(teachers) and myChar:IsDescendantOf(teachers) then return true end
+        end
+    end
+    return false
+end
+
+local function toggleTeamCheck(on)
+    TeamCheckEnabled = on
+    notify("队伍检测", on and "✅ 已开启（队友绿/敌人红）" or "已关闭（全部视为敌人）")
+    if ESPEnabled then refreshESP() end
+end
+
+-- ==================== 透视系统（可开关） ====================
+local espObjects = {}
+
+local function clearESP()
+    for _, data in pairs(espObjects) do
+        pcall(function() data.Highlight:Destroy() end)
+        pcall(function() data.Billboard:Destroy() end)
+    end
+    espObjects = {}
+end
+
+local function refreshESP()
+    if not ESPEnabled then return end
+    for player, data in pairs(espObjects) do
+        if not player.Parent or not player.Character then
+            pcall(function() data.Highlight:Destroy() end)
+            pcall(function() data.Billboard:Destroy() end)
+            espObjects[player] = nil
+        end
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LP then continue end
+        local char = player.Character
+        if not char then continue end
+        local head = char:FindFirstChild("Head")
+        if not head then continue end
+        local isFriend = IsTeammate(player)
+        local color = isFriend and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+        local label = player.Name .. (isFriend and " [队友]" or " [敌人]")
+        if not espObjects[player] then
+            local hl = Instance.new("Highlight")
+            hl.FillColor = color; hl.OutlineColor = Color3.new(1,1,1)
+            hl.FillTransparency = 0.5; hl.Adornee = char; hl.Parent = char
+            local bill = Instance.new("BillboardGui")
+            bill.AlwaysOnTop = true; bill.Size = UDim2.new(0,100,0,30)
+            bill.StudsOffset = Vector3.new(0,2.5,0); bill.Adornee = head; bill.Parent = head
+            local txt = Instance.new("TextLabel", bill)
+            txt.BackgroundTransparency = 1; txt.Text = label; txt.TextColor3 = Color3.new(1,1,1)
+            txt.Font = Enum.Font.SourceSansBold; txt.TextSize = 14
+            espObjects[player] = { Highlight = hl, Billboard = bill }
+        else
+            espObjects[player].Highlight.FillColor = color
+            local bill = espObjects[player].Billboard
+            if bill and bill:FindFirstChild("TextLabel") then
+                bill.TextLabel.Text = label
+            end
+        end
+    end
+end
+
+spawn(function()
+    while task.wait(1) do
+        pcall(refreshESP)
+    end
+end)
+
+LP.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    pcall(refreshESP)
+end)
+
+local function toggleESP(on)
+    ESPEnabled = on
+    if on then
+        refreshESP()
+        notify("透视", "✅ 已开启")
+    else
+        clearESP()
+        notify("透视", "已关闭")
+    end
+end
+
+-- ==================== 防拉回（阈值150） ====================
+local PULLBACK_THRESHOLD = 150
+spawn(function()
+    local lastPosition = nil
+    while task.wait(0.1) do
+        pcall(function()
+            local char = LP.Character
+            if not char then lastPosition = nil; return end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp then lastPosition = nil; return end
+            local currentPos = hrp.Position
+            if lastPosition then
+                local displacement = (currentPos - lastPosition).Magnitude
+                if displacement > PULLBACK_THRESHOLD then
+                    local pushDir = (lastPosition - currentPos).Unit
+                    hrp.Velocity = pushDir * displacement * 3
+                end
+            end
+            lastPosition = hrp.Position
+        end)
+    end
+end)
+
+-- ==================== 应用所有设置（关闭时不做任何修改） ====================
+local function applyAllSettings()
+    local char = LP.Character
+    if char then
+        if MaxStaminaEnabled then
+            pcall(function() char:SetAttribute("MaxStamina", MaxStaminaValue) end)
+        end
+        if StaminaRecoveryEnabled then
+            pcall(function() char:SetAttribute("Stamina", StaminaRecoveryValue) end)
+        end
+    end
+    for attrName, enabled in pairs(PassesEnabled) do
+        if enabled then pcall(function() LP:SetAttribute(attrName, true) end) end
+    end
+end
+
+LP.CharacterAdded:Connect(function() task.wait(0.1); applyAllSettings() end)
+
+spawn(function()
+    while task.wait(0.5) do
+        applyAllSettings()
+    end
+end)
+
+-- ==================== 功能函数 ====================
+local function toggleMaxStamina(on)
+    MaxStaminaEnabled = on
+    if not on then
+        pcall(function()
+            local char = LP.Character
+            if char then char:SetAttribute("MaxStamina", 100) end
+        end)
+    end
+    applyAllSettings()
+    notify("最大体力", on and "✅ 已开启" or "已关闭")
+end
+
+local function setMaxStamina(val)
+    local num = tonumber(val)
+    if not num then return end
+    MaxStaminaValue = num
+    if MaxStaminaEnabled then applyAllSettings() end
+end
+
+local function toggleStaminaRecovery(on)
+    StaminaRecoveryEnabled = on
+    applyAllSettings()
+    notify("体力恢复", on and "✅ 已开启" or "已关闭")
+end
+
+local function setStaminaRecovery(val)
+    local num = tonumber(val)
+    if not num then return end
+    StaminaRecoveryValue = num
+    if StaminaRecoveryEnabled then applyAllSettings() end
+end
+
+local function getPass(name, attrName)
+    PassesEnabled[attrName] = true
+    applyAllSettings()
+    notify("通行证", "✅ 已获取: " .. name)
+end
+
+-- ==================== 原生UI ====================
+local guiParent = LP:WaitForChild("PlayerGui")
+local gui = Instance.new("ScreenGui", guiParent)
+gui.Name = "FPES_Final"; gui.ResetOnSpawn = false
+
+local main = Instance.new("Frame", gui)
+main.Size = UDim2.new(0, 260, 0, 300)
+main.Position = UDim2.new(0.5, -130, 0.45, -150)
+main.BackgroundColor3 = C.Bg; main.BorderSizePixel = 0; main.Active = true
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+
+local tb = Instance.new("Frame", main)
+tb.Size = UDim2.new(1, 0, 0, 36); tb.BackgroundColor3 = C.Bg2; tb.BorderSizePixel = 0; tb.Active = true
+Instance.new("UICorner", tb).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel", tb)
+title.Text = "FPE:S  |  作者: jgft616"
+title.Font = Enum.Font.GothamBold; title.TextSize = 13; title.TextColor3 = C.Text
+title.BackgroundTransparency = 1; title.Position = UDim2.new(0, 12, 0, 0); title.Size = UDim2.new(1, -70, 1, 0); title.TextXAlignment = 0
+
+local userLabel = Instance.new("TextLabel", tb)
+userLabel.Text = UserName; userLabel.Font = Enum.Font.Gotham; userLabel.TextSize = 9; userLabel.TextColor3 = C.Gray
+userLabel.BackgroundTransparency = 1; userLabel.Position = UDim2.new(0, 12, 0, 22); userLabel.Size = UDim2.new(0, 100, 0, 12); userLabel.TextXAlignment = 0
+
+local minBtn = Instance.new("TextButton", tb)
+minBtn.Size = UDim2.new(0, 30, 0, 30); minBtn.Position = UDim2.new(1, -62, 0, 3); minBtn.Text = "–"
+minBtn.Font = Enum.Font.GothamBold; minBtn.TextSize = 22; minBtn.TextColor3 = C.Text
+minBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60); minBtn.BorderSizePixel = 0
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 5)
+
+local closeBtn = Instance.new("TextButton", tb)
+closeBtn.Size = UDim2.new(0, 30, 0, 30); closeBtn.Position = UDim2.new(1, -30, 0, 3); closeBtn.Text = "✕"
+closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 16; closeBtn.TextColor3 = C.Red
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60); closeBtn.BorderSizePixel = 0
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+
+local miniDot = Instance.new("TextButton", gui)
+miniDot.Size = UDim2.new(0, 40, 0, 40); miniDot.Position = UDim2.new(0, 10, 0, 10)
+miniDot.BackgroundColor3 = C.Acc; miniDot.Text = "⚙️"; miniDot.Font = Enum.Font.GothamBold; miniDot.TextSize = 20
+miniDot.TextColor3 = Color3.fromRGB(255, 255, 255); miniDot.Visible = false
+Instance.new("UICorner", miniDot).CornerRadius = UDim.new(1, 0)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function() minimized = true; main.Visible = false; miniDot.Visible = true end)
+miniDot.MouseButton1Click:Connect(function() minimized = false; main.Visible = true; miniDot.Visible = false end)
+closeBtn.MouseButton1Click:Connect(function()
+    MaxStaminaEnabled = false; StaminaRecoveryEnabled = false
+    pcall(function()
+        local char = LP.Character
+        if char then char:SetAttribute("MaxStamina", 100) end
+    end)
+    for k in pairs(PassesEnabled) do PassesEnabled[k] = false end
+    ESPEnabled = false; clearESP()
+    if NightVisionEnabled then toggleNightVision(false) end
+    applyAllSettings(); gui:Destroy()
+end)
+
+local scroll = Instance.new("ScrollingFrame", main)
+scroll.Size = UDim2.new(1, -8, 1, -42); scroll.Position = UDim2.new(0, 4, 0, 40)
+scroll.BackgroundTransparency = 1; scroll.ScrollBarThickness = 6; scroll.ScrollBarImageColor3 = C.Acc
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0); scroll.BorderSizePixel = 0
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local yPos = 0
+local function addControl(child, customHeight)
+    local h = customHeight or 26
+    child.Parent = scroll
+    child.Position = UDim2.new(0, 0, 0, yPos)
+    yPos = yPos + h + 4
+end
+
+local function addLabel(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 18); lbl.BackgroundTransparency = 1
+    lbl.Text = text; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 12; lbl.TextColor3 = C.Acc
+    lbl.TextXAlignment = 0
+    addControl(lbl, 18)
+end
+
+local function addToggleWithInput(labelText, defaultVal, toggleCallback, inputCallback)
+    local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0, 95, 1, 0); label.TextXAlignment = 0
+    local input = Instance.new("TextBox", frame)
+    input.Size = UDim2.new(1, -145, 0, 22); input.Position = UDim2.new(0, 97, 0, 2)
+    input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal)
+    input.Font = Enum.Font.Gotham; input.TextSize = 10; input.TextColor3 = C.Text
+    input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 4)
+    local switch = Instance.new("TextButton", frame)
+    switch.Size = UDim2.new(0, 38, 0, 18); switch.Position = UDim2.new(1, -42, 0.5, -9)
+    switch.BackgroundColor3 = C.Gray; switch.Text = ""; switch.AutoButtonColor = false
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Position = UDim2.new(0, 2, 0.5, -7); knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local state = false
+    switch.MouseButton1Click:Connect(function()
+        state = not state
+        switch.BackgroundColor3 = state and C.Green or C.Gray
+        knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+        if toggleCallback then toggleCallback(state) end
+        if state and inputCallback then inputCallback(input.Text) end
+    end)
+    input:GetPropertyChangedSignal("Text"):Connect(function()
+        if state and inputCallback then inputCallback(input.Text) end
+    end)
+    addControl(frame, 26)
+end
+
+local function addToggle(labelText, default, callback)
+    local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
+    local label = Instance.new("TextLabel", frame); label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 12
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1; label.Size = UDim2.new(0, 140, 1, 0); label.TextXAlignment = 0
+    local switch = Instance.new("TextButton", frame)
+    switch.Size = UDim2.new(0, 40, 0, 20); switch.Position = UDim2.new(1, -44, 0.5, -10)
+    switch.BackgroundColor3 = default and C.Green or C.Gray; switch.Text = ""; switch.AutoButtonColor = false
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 16, 0, 16)
+    knob.Position = default and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local state = default or false
+    switch.MouseButton1Click:Connect(function()
+        state = not state; switch.BackgroundColor3 = state and C.Green or C.Gray
+        knob.Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+        if callback then callback(state) end
+    end)
+    addControl(frame, 26)
+end
+
+local function addButton(text, callback)
+    local btn = Instance.new("TextButton"); btn.Size = UDim2.new(1, 0, 0, 30); btn.BackgroundColor3 = C.Acc
+    btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 12; btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.AutoButtonColor = false; Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.MouseButton1Click:Connect(function()
+        btn.BackgroundColor3 = C.Green; btn.Text = "✅ " .. text; callback()
+        task.wait(1.5); btn.BackgroundColor3 = C.Acc; btn.Text = text
+    end)
+    addControl(btn, 30)
+end
+
+addLabel("体力")
+addToggleWithInput("最大体力", 99999, toggleMaxStamina, setMaxStamina)
+addToggleWithInput("体力恢复", 99999, toggleStaminaRecovery, setStaminaRecovery)
+
+addLabel("视觉")
+addToggle("透视开关", false, toggleESP)
+addToggle("队伍检测", true, toggleTeamCheck)
+addToggle("夜视", false, toggleNightVision)
+
+addLabel("通行证")
+addButton("获取爱丽丝通行证", function() getPass("爱丽丝通行证", "OwnsAlicePass") end)
+addButton("获取 VIP", function() getPass("VIP", "HasVIP") end)
+addButton("获取交换通行证", function() getPass("交换通行证", "HasSwap") end)
+
+-- 拖动系统
+local dragging, dragStart, startPos
+tb.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = main.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local dotDragging, dotStart, dotStartPos
+miniDot.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dotDragging = true; dotStart = input.Position; dotStartPos = miniDot.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dotDragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dotDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dotStart
+        miniDot.Position = UDim2.new(dotStartPos.X.Scale, dotStartPos.X.Offset + delta.X, dotStartPos.Y.Scale, dotStartPos.Y.Offset + delta.Y)
+    end
+end)
+
+notify("FPE:S", "体力 | 视觉 | 通行证 | 防拉回")
