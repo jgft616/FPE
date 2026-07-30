@@ -1,7 +1,8 @@
 --[[
-    FPE:S
+    FPE:S 全能脚本
     作者：jgft616
-    功能：最大体力 + 体力恢复 + 通行证 + 防拉回 + 透视（0.1秒刷新） + 队伍检测 + 夜视 + 电立室门删除 + 皮肤商店删除（仅夜晚有效提示）
+    功能：最大体力 + 体力恢复 + 通行证 + 防拉回 + 透视（0.1秒刷新） + 队伍检测 + 夜视 + 清除所有特效 + 电立室门删除 + 皮肤商店删除
+    说明：清除特效仅移除画面滤镜/雪花/红色等后期效果，不影响透视与队伍检测
 --]]
 
 local Players = game:GetService("Players")
@@ -33,6 +34,8 @@ local PassesEnabled = { OwnsAlicePass = false, HasVIP = false, HasSwap = false }
 local ESPEnabled = false
 local TeamCheckEnabled = true
 local NightVisionEnabled = false
+local ClearEffectsEnabled = false
+local clearEffectsConn = nil
 
 -- 夜视
 local function toggleNightVision(on)
@@ -224,6 +227,32 @@ end
 local function setStaminaRecovery(val) StaminaRecoveryValue = tonumber(val) or StaminaRecoveryValue; if StaminaRecoveryEnabled then applyAllSettings() end end
 local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "✅ 已获取: " .. name) end
 
+-- 清除所有特效（不影响透视/队伍检测）
+local function removeAllEffects()
+    for _, obj in ipairs(Lighting:GetChildren()) do
+        if obj:IsA("PostEffect") then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+end
+
+local function toggleClearEffects(on)
+    ClearEffectsEnabled = on
+    if on then
+        removeAllEffects()
+        if clearEffectsConn then clearEffectsConn:Disconnect() end
+        clearEffectsConn = Lighting.ChildAdded:Connect(function(child)
+            if child:IsA("PostEffect") then
+                pcall(function() child:Destroy() end)
+            end
+        end)
+        notify("清除特效", "✅ 所有后期特效已清除（可能不全但能看见）")
+    else
+        if clearEffectsConn then clearEffectsConn:Disconnect() end
+        notify("清除特效", "已关闭")
+    end
+end
+
 -- ==================== 门/皮肤商店删除 ====================
 local function deleteElectricRoomDoor()
     local doors = workspace:FindFirstChild("Area")
@@ -257,7 +286,6 @@ local function deleteSkinShop()
         return
     end
 
-    -- 删除 SkinSelectionShop 下的对象
     local skinShop = map:FindFirstChild("SkinSelectionShop")
     if skinShop then
         local locker = skinShop:FindFirstChild("BaseLocker")
@@ -266,7 +294,6 @@ local function deleteSkinShop()
         if shelf then pcall(function() shelf:Destroy() end) end
     end
 
-    -- 删除 Doors/StorageDoor 下的 DoubleDoor/DoubleDoor2
     local doors = map:FindFirstChild("Doors")
     if doors then
         local storageDoor = doors:FindFirstChild("StorageDoor")
@@ -278,7 +305,6 @@ local function deleteSkinShop()
         end
     end
 
-    -- 删除碰撞盒
     local collisions = map:FindFirstChild("CollisionBoxes")
     if collisions then
         local col = collisions:FindFirstChild("StorageDoorCollision")
@@ -294,7 +320,7 @@ local gui = Instance.new("ScreenGui", guiParent)
 gui.Name = "FPES_Final"; gui.ResetOnSpawn = false
 
 local main = Instance.new("Frame", gui)
-main.Size = UDim2.new(0, 260, 0, 370); main.Position = UDim2.new(0.5, -130, 0.45, -185)
+main.Size = UDim2.new(0, 260, 0, 400); main.Position = UDim2.new(0.5, -130, 0.45, -200)
 main.BackgroundColor3 = C.Bg; main.BorderSizePixel = 0; main.Active = true
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
 
@@ -338,19 +364,22 @@ closeBtn.MouseButton1Click:Connect(function()
     for k in pairs(PassesEnabled) do PassesEnabled[k] = false end
     ESPEnabled = false; clearESP()
     if NightVisionEnabled then toggleNightVision(false) end
+    if ClearEffectsEnabled then toggleClearEffects(false) end
     applyAllSettings(); gui:Destroy()
 end)
 
+-- 滚动框架（修复滚动到底问题）
 local scroll = Instance.new("ScrollingFrame", main)
 scroll.Size = UDim2.new(1, -8, 1, -42); scroll.Position = UDim2.new(0, 4, 0, 40)
 scroll.BackgroundTransparency = 1; scroll.ScrollBarThickness = 6; scroll.ScrollBarImageColor3 = C.Acc
 scroll.CanvasSize = UDim2.new(0, 0, 0, 0); scroll.BorderSizePixel = 0
-scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.None  -- 手动控制，确保所有控件可见
 
 local yPos = 0
 local function addControl(child, customHeight)
     local h = customHeight or 26
     child.Parent = scroll; child.Position = UDim2.new(0, 0, 0, yPos); yPos = yPos + h + 4
+    scroll.CanvasSize = UDim2.new(0, 0, 0, yPos + 10)  -- 每次都增大画布
 end
 local function addLabel(text)
     local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1, 0, 0, 18); lbl.BackgroundTransparency = 1
@@ -411,6 +440,7 @@ local function addButton(text, callback)
     addControl(btn, 30)
 end
 
+-- 构建UI内容
 addLabel("体力")
 addToggleWithInput("最大体力", 99999, toggleMaxStamina, setMaxStamina)
 addToggleWithInput("体力恢复", 99999, toggleStaminaRecovery, setStaminaRecovery)
@@ -418,6 +448,7 @@ addLabel("视觉")
 addToggle("透视开关", false, toggleESP)
 addToggle("队伍检测", true, toggleTeamCheck)
 addToggle("夜视", false, toggleNightVision)
+addToggle("清除所有特效（清除不全但也能看见）", false, toggleClearEffects)
 addLabel("通行证")
 addButton("获取爱丽丝通行证", function() getPass("爱丽丝通行证", "OwnsAlicePass") end)
 addButton("获取 VIP", function() getPass("VIP", "HasVIP") end)
@@ -460,4 +491,4 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-notify("FPE:S", "体力 | 视觉 | 通行证 | 防拉回 | 删除")
+notify("FPE:S", "体力 | 视觉 | 通行证 | 删除 | 清除特效")
