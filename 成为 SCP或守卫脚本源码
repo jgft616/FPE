@@ -1,0 +1,917 @@
+-- SCP 多功能脚本 最终稳定版（兄弟的誓言）
+-- 作者：jgft616 🐧2969300867
+-- 免费脚本，禁止倒卖，可以开源
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Teams = game:GetService("Teams")
+local RS = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+-- 安全获取事件
+local function waitForRemote(parent, name)
+    local obj = parent:FindFirstChild(name)
+    if not obj then
+        repeat task.wait(0.5) until parent:FindFirstChild(name)
+        obj = parent[name]
+    end
+    return obj
+end
+
+local GunShot = waitForRemote(RS, "GunShot")
+local CloakEvent = waitForRemote(RS, "966Cloak")
+local Teleport173 = waitForRemote(RS, "173Teleport")
+local Erupt457 = waitForRemote(RS, "457Erupt")
+
+-- ================= 设置（所有功能默认关闭） =================
+local killEnabled = false
+local blacklistEnabled = false
+local blacklistPlayerName = ""
+local teleportEnabled = false
+local teleportInterval = 0.01
+local safeTeleportEnabled = false
+local safePosition = Vector3.new(116.80, 4.25, -318.32)
+local originalSafePosition = nil
+local friendCheckEnabled = false
+local teamCheckEnabled = false
+local whitelistEnabled = false
+local whitelistTeams = {}
+local showJumpButton = false
+local shootInterval = 0.1
+local aimHead = true
+local showBeam = false
+local wallCheck = false
+local enemyESP = false
+local allyESP = false
+local infiniteCloak = false
+local assist173Enabled = false
+local escape106Enabled = false
+
+local ESCAPE_106_POS = Vector3.new(215.50, 193.25, -390.62)
+local ESCAPE_DISTANCE = 10
+local positionHistory = {}
+local espUpdateInterval = 0.1
+
+local shootBuffer
+pcall(function()
+    shootBuffer = buffer.fromstring("\001\223\131\190\194\232\1453\194#y\192\195\147Y\189\194\221\2434\194\204l\188\195")
+end)
+if not shootBuffer then
+    shootBuffer = "\001\223\131\190\194\232\1453\194#y\192\195\147Y\189\194\221\2434\194\204l\188\195"
+end
+
+-- 好友列表
+local friendSet = {}
+local function refreshFriends()
+    friendSet = {}
+    pcall(function()
+        local success, friends = pcall(function()
+            return Players:GetFriendsAsync(LocalPlayer.UserId)
+        end)
+        if success and friends then
+            for _, friend in ipairs(friends) do
+                friendSet[friend.VisitorId] = true
+                friendSet[friend.Id] = true
+            end
+        end
+    end)
+end
+refreshFriends()
+task.spawn(function() while true do refreshFriends() task.wait(30) end end)
+
+-- 弹道
+local beam, att0, att1, beamTimeout
+local function createBeam()
+    if beam then return end
+    att0 = Instance.new("Attachment", workspace.Terrain or workspace)
+    att1 = Instance.new("Attachment", workspace.Terrain or workspace)
+    beam = Instance.new("Beam")
+    beam.Attachment0 = att0
+    beam.Attachment1 = att1
+    beam.Color = ColorSequence.new(Color3.fromRGB(255, 50, 50))
+    beam.Width0 = 0.15
+    beam.Width1 = 0.15
+    beam.FaceCamera = true
+    beam.Enabled = false
+    beam.Parent = workspace.Terrain or workspace
+end
+local function showBeamTo(targetPos)
+    if not showBeam then return end
+    createBeam()
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then beam.Enabled = false; return end
+    att0.WorldPosition = myRoot.Position + Vector3.new(0, 1.5, 0)
+    att1.WorldPosition = targetPos
+    beam.Enabled = true
+    if beamTimeout then task.cancel(beamTimeout) end
+    beamTimeout = task.delay(0.2, function() if beam then beam.Enabled = false end end)
+end
+
+-- 敌人判定
+function isEnemy(player)
+    if not player then return false end
+    if friendCheckEnabled and friendSet[player.UserId] then return false end
+    if teamCheckEnabled and LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team then return false end
+    if whitelistEnabled then
+        for _, teamName in ipairs(whitelistTeams) do
+            local team = Teams:FindFirstChild(teamName)
+            if team and player.Team == team then return false end
+        end
+    end
+    return true
+end
+
+local function isAlly(player)
+    if not player then return false end
+    if teamCheckEnabled and LocalPlayer.Team and player.Team and LocalPlayer.Team == player.Team then return true end
+    if whitelistEnabled and player.Team then
+        for _, teamName in ipairs(whitelistTeams) do
+            local team = Teams:FindFirstChild(teamName)
+            if team and player.Team == team then return true end
+        end
+    end
+    return false
+end
+
+local function isEnemyPlayer(player)
+    return not isAlly(player) and not (friendCheckEnabled and friendSet[player.UserId])
+end
+
+-- 墙壁检测
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+local function isVisible(targetPlayer)
+    local myChar = LocalPlayer.Character
+    local targetChar = targetPlayer.Character
+    if not myChar or not targetChar then return false end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    local targetPart = aimHead and targetChar:FindFirstChild("Head") or targetChar:FindFirstChild("HumanoidRootPart") or targetChar:FindFirstChild("Torso")
+    if not myRoot or not targetPart then return false end
+    local origin = myRoot.Position + Vector3.new(0, 1.5, 0)
+    local direction = targetPart.Position - origin
+    rayParams.FilterDescendantsInstances = {myChar, targetChar}
+    return workspace:Raycast(origin, direction, rayParams) == nil
+end
+
+local function getNearestEnemy()
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    local nearestPlayer, nearestDist = nil, math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and isEnemy(player) then
+            local char = player.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                local dist = (myRoot.Position - root.Position).Magnitude
+                if dist < nearestDist then
+                    nearestDist = dist
+                    nearestPlayer = player
+                end
+            end
+        end
+    end
+    return nearestPlayer
+end
+
+-- 攻击目标
+local function getTargets()
+    if not killEnabled then return {} end
+    if blacklistEnabled and blacklistPlayerName ~= "" then
+        local targetPlayer = Players:FindFirstChild(blacklistPlayerName)
+        if targetPlayer and targetPlayer ~= LocalPlayer and isEnemy(targetPlayer) then
+            local char = targetPlayer.Character
+            if char then
+                local hum = char:FindFirstChild("Humanoid")
+                if hum and hum.Health > 0 then
+                    local part = aimHead and char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+                    if part and (not wallCheck or isVisible(targetPlayer)) then
+                        return { {player = targetPlayer, part = part} }
+                    end
+                end
+            end
+        end
+        return {}
+    end
+    local targets = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and isEnemy(player) then
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChild("Humanoid")
+                if hum and hum.Health > 0 then
+                    local part = aimHead and char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")
+                    if part then
+                        if wallCheck and not isVisible(player) then
+                        else
+                            table.insert(targets, {player = player, part = part})
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return targets
+end
+
+local function getTeleportTargets()
+    if not teleportEnabled then return {} end
+    local targets = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and isEnemy(player) then
+            local char = player.Character
+            if char then
+                local hum = char:FindFirstChild("Humanoid")
+                if hum and hum.Health > 0 then
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    if root then table.insert(targets, root) end
+                end
+            end
+        end
+    end
+    return targets
+end
+
+-- ================= GUI 构建 =================
+-- 跳跃按钮
+local JumpButtonGui = Instance.new("ScreenGui")
+JumpButtonGui.Name = "JumpBtnGUI"
+JumpButtonGui.ResetOnSpawn = false
+pcall(function() syn.protect_gui(JumpButtonGui) end)
+JumpButtonGui.Parent = game.CoreGui
+
+local JumpBtn = Instance.new("TextButton", JumpButtonGui)
+JumpBtn.Size = UDim2.new(0,80,0,50)
+JumpBtn.Position = UDim2.new(1,-100,0.8,0)
+JumpBtn.Text = "跳跃"
+JumpBtn.BackgroundColor3 = Color3.fromRGB(80,200,80)
+JumpBtn.TextColor3 = Color3.new(1,1,1)
+JumpBtn.Font = Enum.Font.SourceSansBold
+JumpBtn.TextSize = 20
+JumpBtn.Visible = false
+JumpBtn.ZIndex = 10
+
+local jumpDragStart, jumpDragStartPos, jumpDragging
+JumpBtn.MouseButton1Down:Connect(function()
+    jumpDragStart = UserInputService:GetMouseLocation()
+    jumpDragStartPos = JumpBtn.Position
+    jumpDragging = true
+end)
+JumpBtn.MouseMoved:Connect(function()
+    if jumpDragging then
+        local delta = UserInputService:GetMouseLocation() - jumpDragStart
+        JumpBtn.Position = UDim2.new(jumpDragStartPos.X.Scale, jumpDragStartPos.X.Offset+delta.X, jumpDragStartPos.Y.Scale, jumpDragStartPos.Y.Offset+delta.Y)
+    end
+end)
+JumpBtn.MouseButton1Up:Connect(function() jumpDragging = false end)
+JumpBtn.MouseButton1Click:Connect(function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if hum then hum.Sit = false; hum.PlatformStand = false end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then root.Velocity = Vector3.new(0,50,0) end
+end)
+
+-- ESP 系统
+local espContainer = Instance.new("Folder", game.CoreGui)
+espContainer.Name = "MainESP"
+local playerESPs = {}
+
+local function createESP(model, color, playerObj)
+    if playerESPs[model] then return end
+    local highlight = Instance.new("Highlight", espContainer)
+    highlight.Adornee = model
+    highlight.FillColor = color
+    highlight.FillTransparency = 0.5
+    highlight.OutlineColor = Color3.fromRGB(255,255,255)
+    highlight.OutlineTransparency = 0
+    local head = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+    local billboard = Instance.new("BillboardGui", espContainer)
+    billboard.Adornee = head
+    billboard.Size = UDim2.new(0,200,0,40)
+    billboard.StudsOffset = Vector3.new(0,2.5,0)
+    billboard.AlwaysOnTop = true
+    local nameLabel = Instance.new("TextLabel", billboard)
+    nameLabel.Size = UDim2.new(1,0,0,20)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.TextColor3 = Color3.new(1,1,1)
+    nameLabel.TextStrokeTransparency = 0.5
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    local infoLabel = Instance.new("TextLabel", billboard)
+    infoLabel.Size = UDim2.new(1,0,0,20)
+    infoLabel.Position = UDim2.new(0,0,0,20)
+    infoLabel.BackgroundTransparency = 1
+    infoLabel.TextColor3 = Color3.new(1,0.5,0.5)
+    infoLabel.TextStrokeTransparency = 0.5
+    infoLabel.Font = Enum.Font.SourceSans
+    infoLabel.TextSize = 12
+    playerESPs[model] = { highlight=highlight, billboard=billboard, nameLabel=nameLabel, infoLabel=infoLabel, player=playerObj, model=model }
+end
+
+local function removeESP(model)
+    local esp = playerESPs[model]
+    if esp then esp.highlight:Destroy(); esp.billboard:Destroy(); playerESPs[model] = nil end
+end
+
+local function scanAndUpdateESP()
+    for model, esp in pairs(playerESPs) do
+        if not model.Parent or not esp.player or not esp.player.Parent then removeESP(model) end
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local model = player.Character
+            local isEnemyCheck = isEnemyPlayer(player)
+            local isAllyCheck = isAlly(player)
+            local existing = playerESPs[model]
+            if enemyESP and isEnemyCheck and not existing then
+                createESP(model, Color3.fromRGB(255,0,0), player)
+            end
+            if allyESP and isAllyCheck and not existing then
+                createESP(model, Color3.fromRGB(0,255,0), player)
+            end
+            if existing then
+                local shouldRemove = false
+                if existing.highlight.FillColor == Color3.fromRGB(255,0,0) then
+                    if not enemyESP or not isEnemyCheck then shouldRemove = true end
+                elseif existing.highlight.FillColor == Color3.fromRGB(0,255,0) then
+                    if not allyESP or not isAllyCheck then shouldRemove = true end
+                end
+                if shouldRemove then removeESP(model) end
+            end
+        end
+    end
+    for _, esp in pairs(playerESPs) do
+        if esp.player and esp.player.Character then
+            local hum = esp.player.Character:FindFirstChild("Humanoid")
+            local head = esp.player.Character:FindFirstChild("Head")
+            if hum and head then
+                esp.nameLabel.Text = esp.player.Name
+                if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    local dist = (LocalPlayer.Character.HumanoidRootPart.Position - head.Position).Magnitude
+                    esp.infoLabel.Text = string.format("HP: %.0f | %.0f m", hum.Health, dist)
+                end
+            end
+        end
+    end
+end
+
+task.spawn(function() while true do scanAndUpdateESP() task.wait(espUpdateInterval) end end)
+Players.PlayerRemoving:Connect(function(player) if player.Character then removeESP(player.Character) end end)
+
+-- 主 GUI 框架
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SCP_Script"
+ScreenGui.ResetOnSpawn = false
+pcall(function() syn.protect_gui(ScreenGui) end)
+ScreenGui.Parent = game.CoreGui
+
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0,270,0,25)
+MainFrame.Position = UDim2.new(0,20,0,20)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+MainFrame.BorderSizePixel = 0
+MainFrame.ClipsDescendants = true
+
+local TitleBar = Instance.new("Frame", MainFrame)
+TitleBar.Size = UDim2.new(1,0,0,25)
+TitleBar.BackgroundColor3 = Color3.fromRGB(50,50,50)
+TitleBar.BorderSizePixel = 0
+
+local DragBtn = Instance.new("TextButton", TitleBar)
+DragBtn.Size = UDim2.new(1,-40,1,0)
+DragBtn.Text = "SCP 脚本"
+DragBtn.BackgroundTransparency = 1
+DragBtn.TextColor3 = Color3.new(1,1,1)
+DragBtn.Font = Enum.Font.SourceSansBold
+DragBtn.TextSize = 13
+DragBtn.TextXAlignment = Enum.TextXAlignment.Center
+
+local MainFoldBtn = Instance.new("TextButton", TitleBar)
+MainFoldBtn.Size = UDim2.new(0,40,1,0)
+MainFoldBtn.Position = UDim2.new(1,-40,0,0)
+MainFoldBtn.Text = "▼ 折叠"
+MainFoldBtn.BackgroundColor3 = Color3.fromRGB(70,70,70)
+MainFoldBtn.TextColor3 = Color3.new(1,1,1)
+MainFoldBtn.Font = Enum.Font.SourceSans
+MainFoldBtn.TextSize = 11
+
+local dragStart, startPos, dragging
+DragBtn.MouseButton1Down:Connect(function()
+    dragStart = UserInputService:GetMouseLocation()
+    startPos = MainFrame.Position
+    dragging = true
+end)
+DragBtn.MouseMoved:Connect(function()
+    if dragging then
+        local delta = UserInputService:GetMouseLocation() - dragStart
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+delta.X, startPos.Y.Scale, startPos.Y.Offset+delta.Y)
+    end
+end)
+DragBtn.MouseButton1Up:Connect(function() dragging = false end)
+
+local ContentFrame = Instance.new("Frame", MainFrame)
+ContentFrame.Size = UDim2.new(1,0,0,0)
+ContentFrame.Position = UDim2.new(0,0,0,25)
+ContentFrame.BackgroundColor3 = Color3.fromRGB(30,30,30)
+ContentFrame.BorderSizePixel = 0
+ContentFrame.ClipsDescendants = true
+ContentFrame.Visible = false
+
+local ContentList = Instance.new("UIListLayout", ContentFrame)
+ContentList.SortOrder = Enum.SortOrder.LayoutOrder
+ContentList.Padding = UDim.new(0,3)
+
+local mainExpanded = false
+local function setMainExpanded(expanded)
+    mainExpanded = expanded
+    ContentFrame.Visible = expanded
+    MainFoldBtn.Text = expanded and "▼ 折叠" or "▲ 展开"
+    if expanded then
+        local totalHeight = ContentList.AbsoluteContentSize.Y
+        ContentFrame.Size = UDim2.new(1,0,0,totalHeight)
+        MainFrame.Size = UDim2.new(0,270,0,25+totalHeight)
+    else
+        MainFrame.Size = UDim2.new(0,270,0,25)
+    end
+end
+MainFoldBtn.MouseButton1Click:Connect(function() setMainExpanded(not mainExpanded) end)
+ContentList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    if mainExpanded then
+        local totalHeight = ContentList.AbsoluteContentSize.Y
+        ContentFrame.Size = UDim2.new(1,0,0,totalHeight)
+        MainFrame.Size = UDim2.new(0,270,0,25+totalHeight)
+    end
+end)
+
+-- 通用控件
+local function createSwitch(parent, text, initial, callback)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1,-10,0,28)
+    btn.Text = text .. ": " .. (initial and "开启" or "关闭")
+    btn.BackgroundColor3 = initial and Color3.fromRGB(80,180,80) or Color3.fromRGB(180,80,80)
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 14
+    local enabled = initial
+    btn.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        btn.Text = text .. ": " .. (enabled and "开启" or "关闭")
+        btn.BackgroundColor3 = enabled and Color3.fromRGB(80,180,80) or Color3.fromRGB(180,80,80)
+        callback(enabled)
+    end)
+    return btn
+end
+
+local function createSlider(parent, label, default, formatFunc, callback)
+    local frame = Instance.new("Frame", parent)
+    frame.Size = UDim2.new(1,-10,0,44)
+    frame.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", frame)
+    lbl.Size = UDim2.new(1,0,0,18)
+    lbl.Text = label .. ": " .. formatFunc(default)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3 = Color3.new(0.9,0.9,0.9)
+    lbl.TextSize = 13
+    local box = Instance.new("TextBox", frame)
+    box.Size = UDim2.new(1,-10,0,25)
+    box.Position = UDim2.new(0,5,0,18)
+    box.Text = tostring(default)
+    box.Font = Enum.Font.SourceSans
+    box.TextSize = 13
+    box.FocusLost:Connect(function()
+        local num = tonumber(box.Text)
+        if num then
+            default = num
+            lbl.Text = label .. ": " .. formatFunc(num)
+            if callback then callback(num) end
+        else
+            box.Text = tostring(default)
+        end
+    end)
+    return frame
+end
+
+local function copyToClipboard(text)
+    pcall(function() syn.set_clipboard(text) end)
+    pcall(function() setclipboard(text) end)
+end
+
+local function createScrollSection(parent, title, defaultOpen, maxHeight)
+    local section = Instance.new("Frame", parent)
+    section.Size = UDim2.new(1,-4,0,25)
+    section.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    section.BorderSizePixel = 0
+    section.LayoutOrder = 0
+    local header = Instance.new("TextButton", section)
+    header.Size = UDim2.new(1,0,0,25)
+    header.Text = (defaultOpen and "▼ " or "▶ ") .. title
+    header.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    header.TextColor3 = Color3.new(1,1,1)
+    header.Font = Enum.Font.SourceSansBold
+    header.TextSize = 13
+    header.TextXAlignment = Enum.TextXAlignment.Left
+    header.AutoButtonColor = false
+    local scroll = Instance.new("ScrollingFrame", section)
+    scroll.Size = UDim2.new(1,0,0,0)
+    scroll.Position = UDim2.new(0,0,0,25)
+    scroll.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    scroll.BorderSizePixel = 0
+    scroll.Visible = defaultOpen
+    scroll.ScrollBarThickness = 6
+    scroll.ScrollBarImageColor3 = Color3.fromRGB(80,145,255)
+    scroll.ScrollBarImageTransparency = 0.2
+    scroll.CanvasSize = UDim2.new(0,0,0,0)
+    scroll.ClipsDescendants = true
+    scroll.ElasticBehavior = Enum.ElasticBehavior.Never
+    scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+    local innerContent = Instance.new("Frame", scroll)
+    innerContent.Size = UDim2.new(1,0,0,0)
+    innerContent.BackgroundColor3 = Color3.fromRGB(35,35,35)
+    innerContent.BorderSizePixel = 0
+    local innerList = Instance.new("UIListLayout", innerContent)
+    innerList.SortOrder = Enum.SortOrder.LayoutOrder
+    innerList.Padding = UDim.new(0,3)
+    local isOpen = defaultOpen
+    maxHeight = maxHeight or 220
+    local function updateSectionHeight()
+        if not isOpen then
+            section.Size = UDim2.new(1,-4,0,25)
+            return
+        end
+        local contentHeight = innerList.AbsoluteContentSize.Y + 6
+        local displayHeight = math.min(contentHeight, maxHeight)
+        scroll.Size = UDim2.new(1,0,0,displayHeight)
+        section.Size = UDim2.new(1,-4,0,25+displayHeight)
+        scroll.CanvasSize = UDim2.new(0,0,0,contentHeight+10)
+    end
+    header.MouseButton1Click:Connect(function()
+        isOpen = not isOpen
+        scroll.Visible = isOpen
+        header.Text = (isOpen and "▼ " or "▶ ") .. title
+        updateSectionHeight()
+    end)
+    innerList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateSectionHeight)
+    return innerContent, updateSectionHeight
+end
+
+-- ================= 构建分组 =================
+-- 0. 简介
+local introContent, introUpdate = createScrollSection(ContentFrame, "📋 简介", true, 250)
+local authorLabel = Instance.new("TextLabel", introContent)
+authorLabel.Size = UDim2.new(1,-10,0,22)
+authorLabel.Text = "作者：jgft616"
+authorLabel.BackgroundTransparency = 1
+authorLabel.TextColor3 = Color3.new(1,1,1)
+authorLabel.Font = Enum.Font.SourceSansBold
+authorLabel.TextSize = 14
+local contactLabel = Instance.new("TextLabel", introContent)
+contactLabel.Size = UDim2.new(1,-10,0,22)
+contactLabel.Text = "🐧 2969300867"
+contactLabel.BackgroundTransparency = 1
+contactLabel.TextColor3 = Color3.new(0.8,0.8,1)
+contactLabel.Font = Enum.Font.SourceSans
+contactLabel.TextSize = 13
+local copyrightLabel = Instance.new("TextLabel", introContent)
+copyrightLabel.Size = UDim2.new(1,-10,0,22)
+copyrightLabel.Text = "此脚本纯免费 禁止倒卖 可以开源"
+copyrightLabel.BackgroundTransparency = 1
+copyrightLabel.TextColor3 = Color3.new(1,0.6,0.3)
+copyrightLabel.Font = Enum.Font.SourceSansBold
+copyrightLabel.TextSize = 12
+local copyGroupBtn = Instance.new("TextButton", introContent)
+copyGroupBtn.Size = UDim2.new(1,-10,0,28)
+copyGroupBtn.Text = "复制QQ群: 1046798871"
+copyGroupBtn.BackgroundColor3 = Color3.fromRGB(80,120,200)
+copyGroupBtn.TextColor3 = Color3.new(1,1,1)
+copyGroupBtn.Font = Enum.Font.SourceSansBold
+copyGroupBtn.TextSize = 13
+copyGroupBtn.MouseButton1Click:Connect(function()
+    copyToClipboard("1046798871")
+    copyGroupBtn.Text = "已复制！"
+    task.delay(1, function() if copyGroupBtn and copyGroupBtn.Parent then copyGroupBtn.Text = "复制QQ群: 1046798871" end end)
+end)
+local usageLabel = Instance.new("TextLabel", introContent)
+usageLabel.Size = UDim2.new(1,-10,0,80)
+usageLabel.Text = [[使用说明：
+🎯 攻击控制 - 全图攻击、黑名单集火、传送敌人等
+🛡 防御辅助 - 安全点、跳跃按钮、好友/队伍/白名单
+👁 透视视觉 - 墙壁检测、弹道、敌人/队友透视
+🔬 SCP功能 - 966隐身、457爆发、173辅助、106逃脱
+所有开关默认关闭，需手动开启]]
+usageLabel.BackgroundTransparency = 1
+usageLabel.TextColor3 = Color3.new(0.7,0.7,0.7)
+usageLabel.Font = Enum.Font.SourceSans
+usageLabel.TextSize = 11
+usageLabel.TextWrapped = true
+usageLabel.TextXAlignment = Enum.TextXAlignment.Left
+introUpdate()
+
+-- 1. 攻击控制
+local attackContent, attackUpdate = createScrollSection(ContentFrame, "🎯 攻击控制", false)
+createSwitch(attackContent, "全图攻击", killEnabled, function(enabled) killEnabled = enabled end)
+createSwitch(attackContent, "黑名单模式", blacklistEnabled, function(enabled) blacklistEnabled = enabled end)
+
+local blacklistBtn = Instance.new("TextButton", attackContent)
+blacklistBtn.Size = UDim2.new(1,-10,0,28)
+blacklistBtn.Text = blacklistPlayerName ~= "" and ("黑名单: " .. blacklistPlayerName) or "选择黑名单"
+blacklistBtn.BackgroundColor3 = Color3.fromRGB(180,80,80)
+blacklistBtn.TextColor3 = Color3.new(1,1,1)
+blacklistBtn.Font = Enum.Font.SourceSansBold
+blacklistBtn.TextSize = 14
+blacklistBtn.MouseButton1Click:Connect(function()
+    if blacklistBtn:FindFirstChild("OldDrop") then blacklistBtn.OldDrop:Destroy() end
+    local dropFrame = Instance.new("ScrollingFrame", ScreenGui)
+    dropFrame.Size = UDim2.new(0,200,0,150)
+    dropFrame.Position = UDim2.new(0, blacklistBtn.AbsolutePosition.X, 0, blacklistBtn.AbsolutePosition.Y + blacklistBtn.AbsoluteSize.Y + 2)
+    dropFrame.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    dropFrame.ScrollBarThickness = 4
+    dropFrame.ZIndex = 100
+    dropFrame.BorderSizePixel = 0
+    local listLayout = Instance.new("UIListLayout", dropFrame)
+    listLayout.Padding = UDim.new(0,2)
+    local enemies = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and isEnemy(player) then
+            table.insert(enemies, player)
+        end
+    end
+    for i, player in ipairs(enemies) do
+        local btn = Instance.new("TextButton", dropFrame)
+        btn.Size = UDim2.new(1,-4,0,23)
+        btn.Text = player.Name
+        btn.BackgroundColor3 = (blacklistPlayerName == player.Name) and Color3.fromRGB(80,180,80) or Color3.fromRGB(60,60,60)
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Font = Enum.Font.SourceSans
+        btn.TextSize = 12
+        btn.ZIndex = 101
+        btn.MouseButton1Click:Connect(function()
+            blacklistPlayerName = player.Name
+            blacklistBtn.Text = "黑名单: " .. player.Name
+            dropFrame:Destroy()
+        end)
+    end
+    if #enemies == 0 then
+        local emptyLabel = Instance.new("TextLabel", dropFrame)
+        emptyLabel.Size = UDim2.new(1,-4,0,23)
+        emptyLabel.Text = "无敌对玩家"
+        emptyLabel.BackgroundTransparency = 1
+        emptyLabel.TextColor3 = Color3.new(0.7,0.7,0.7)
+        emptyLabel.Font = Enum.Font.SourceSans
+        emptyLabel.TextSize = 12
+    end
+    dropFrame.CanvasSize = UDim2.new(0,0,0, math.max(#enemies*25+10,30))
+    local clickBlocker = Instance.new("TextButton", ScreenGui)
+    clickBlocker.Size = UDim2.new(1,0,1,0)
+    clickBlocker.BackgroundTransparency = 1
+    clickBlocker.ZIndex = 99
+    clickBlocker.MouseButton1Click:Connect(function() dropFrame:Destroy() clickBlocker:Destroy() end)
+    dropFrame.AncestryChanged:Connect(function() if not dropFrame.Parent then clickBlocker:Destroy() end end)
+end)
+
+local clearBlacklistBtn = Instance.new("TextButton", attackContent)
+clearBlacklistBtn.Size = UDim2.new(1,-10,0,28)
+clearBlacklistBtn.Text = "清除黑名单"
+clearBlacklistBtn.BackgroundColor3 = Color3.fromRGB(100,100,100)
+clearBlacklistBtn.TextColor3 = Color3.new(1,1,1)
+clearBlacklistBtn.Font = Enum.Font.SourceSansBold
+clearBlacklistBtn.TextSize = 14
+clearBlacklistBtn.MouseButton1Click:Connect(function() blacklistPlayerName = "" blacklistBtn.Text = "选择黑名单" end)
+
+local teleportBtn = Instance.new("TextButton", attackContent)
+teleportBtn.Size = UDim2.new(1,-10,0,28)
+teleportBtn.Text = "传送敌人 (SPC): 关闭"
+teleportBtn.BackgroundColor3 = Color3.fromRGB(180,80,80)
+teleportBtn.TextColor3 = Color3.new(1,1,1)
+teleportBtn.Font = Enum.Font.SourceSansBold
+teleportBtn.TextSize = 14
+teleportBtn.MouseButton1Click:Connect(function()
+    teleportEnabled = not teleportEnabled
+    teleportBtn.Text = "传送敌人 (SPC): " .. (teleportEnabled and "开启" or "关闭")
+    teleportBtn.BackgroundColor3 = teleportEnabled and Color3.fromRGB(80,180,80) or Color3.fromRGB(180,80,80)
+end)
+
+createSlider(attackContent, "传送间隔", teleportInterval, function(v) return v .. " 秒" end, function(v) teleportInterval = v end)
+createSlider(attackContent, "射击间隔", shootInterval, function(v) return v .. " 秒" end, function(v) shootInterval = v end)
+
+local partBtn = Instance.new("TextButton", attackContent)
+partBtn.Size = UDim2.new(1,-10,0,28)
+partBtn.Text = "瞄准部位: " .. (aimHead and "头部" or "躯干")
+partBtn.BackgroundColor3 = Color3.fromRGB(70,130,200)
+partBtn.TextColor3 = Color3.new(1,1,1)
+partBtn.Font = Enum.Font.SourceSansBold
+partBtn.TextSize = 14
+partBtn.MouseButton1Click:Connect(function() aimHead = not aimHead; partBtn.Text = "瞄准部位: " .. (aimHead and "头部" or "躯干") end)
+attackUpdate()
+
+-- 2. 防御与辅助
+local defenseContent, defenseUpdate = createScrollSection(ContentFrame, "🛡 防御与辅助", false)
+local safeBtn = Instance.new("TextButton", defenseContent)
+safeBtn.Size = UDim2.new(1,-10,0,28)
+safeBtn.Text = "安全点: 关闭"
+safeBtn.BackgroundColor3 = Color3.fromRGB(180,80,80)
+safeBtn.TextColor3 = Color3.new(1,1,1)
+safeBtn.Font = Enum.Font.SourceSansBold
+safeBtn.TextSize = 12
+safeBtn.MouseButton1Click:Connect(function()
+    safeTeleportEnabled = not safeTeleportEnabled
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if safeTeleportEnabled then
+        if root then originalSafePosition = root.Position; root.CFrame = CFrame.new(safePosition) end
+        safeBtn.Text = "安全点: 开启"
+        safeBtn.BackgroundColor3 = Color3.fromRGB(80,180,80)
+    else
+        if root and originalSafePosition then root.CFrame = CFrame.new(originalSafePosition) end
+        safeBtn.Text = "安全点: 关闭"
+        safeBtn.BackgroundColor3 = Color3.fromRGB(180,80,80)
+    end
+end)
+createSwitch(defenseContent, "跳跃按钮", showJumpButton, function(enabled) showJumpButton = enabled; JumpBtn.Visible = enabled end)
+createSwitch(defenseContent, "不攻击好友", friendCheckEnabled, function(enabled) friendCheckEnabled = enabled end)
+createSwitch(defenseContent, "队伍检测", teamCheckEnabled, function(enabled) teamCheckEnabled = enabled end)
+createSwitch(defenseContent, "队伍白名单", whitelistEnabled, function(enabled) whitelistEnabled = enabled end)
+
+local whitelistFrame = Instance.new("Frame", defenseContent)
+whitelistFrame.Size = UDim2.new(1,-10,0,80)
+whitelistFrame.BackgroundColor3 = Color3.fromRGB(40,40,40)
+local whitelistScrolling = Instance.new("ScrollingFrame", whitelistFrame)
+whitelistScrolling.Size = UDim2.new(1,-4,0,76)
+whitelistScrolling.Position = UDim2.new(0,2,0,2)
+whitelistScrolling.BackgroundColor3 = Color3.fromRGB(40,40,40)
+whitelistScrolling.CanvasSize = UDim2.new(0,0,0,0)
+whitelistScrolling.ScrollBarThickness = 4
+local whitelistLayout = Instance.new("UIListLayout", whitelistScrolling)
+whitelistLayout.Padding = UDim.new(0,2)
+local function refreshWhitelist()
+    for _, c in ipairs(whitelistScrolling:GetChildren()) do if c:IsA("TextButton") or c:IsA("TextLabel") then c:Destroy() end end
+    for _, team in ipairs(Teams:GetTeams()) do
+        local btn = Instance.new("TextButton", whitelistScrolling)
+        btn.Size = UDim2.new(1,-4,0,23)
+        btn.Text = team.Name .. (table.find(whitelistTeams, team.Name) and " ✓" or "")
+        btn.BackgroundColor3 = table.find(whitelistTeams, team.Name) and Color3.fromRGB(80,180,80) or Color3.fromRGB(60,60,60)
+        btn.TextColor3 = Color3.new(1,1,1)
+        btn.Font = Enum.Font.SourceSans
+        btn.TextSize = 12
+        btn.MouseButton1Click:Connect(function()
+            local idx = table.find(whitelistTeams, team.Name)
+            if idx then table.remove(whitelistTeams, idx) else table.insert(whitelistTeams, team.Name) end
+            refreshWhitelist()
+        end)
+    end
+    whitelistScrolling.CanvasSize = UDim2.new(0,0,0, #whitelistScrolling:GetChildren()*25+10)
+end
+refreshWhitelist()
+defenseUpdate()
+
+-- 3. 透视与视觉
+local visionContent, visionUpdate = createScrollSection(ContentFrame, "👁 透视与视觉", false)
+createSwitch(visionContent, "墙壁检测", wallCheck, function(enabled) wallCheck = enabled end)
+createSwitch(visionContent, "显示弹道", showBeam, function(enabled) showBeam = enabled; if not enabled and beam then beam.Enabled = false end end)
+createSwitch(visionContent, "敌人透视", enemyESP, function(enabled) enemyESP = enabled end)
+createSwitch(visionContent, "队友透视", allyESP, function(enabled) allyESP = enabled end)
+visionUpdate()
+
+-- 4. SCP 功能
+local scpContent, scpUpdate = createScrollSection(ContentFrame, "🔬 SCP 功能", false)
+createSwitch(scpContent, "无限隐身 (966)", infiniteCloak, function(enabled) infiniteCloak = enabled end)
+
+local trigger457Btn = Instance.new("TextButton", scpContent)
+trigger457Btn.Size = UDim2.new(1,-10,0,28)
+trigger457Btn.Text = "强制触发 457 (爆发)"
+trigger457Btn.BackgroundColor3 = Color3.fromRGB(220,120,30)
+trigger457Btn.TextColor3 = Color3.new(1,1,1)
+trigger457Btn.Font = Enum.Font.SourceSansBold
+trigger457Btn.TextSize = 14
+trigger457Btn.MouseButton1Click:Connect(function() pcall(function() Erupt457:FireServer() end) end)
+
+createSwitch(scpContent, "173辅助 (传送到最近敌人)", assist173Enabled, function(enabled) assist173Enabled = enabled end)
+createSwitch(scpContent, "106 自动逃脱", escape106Enabled, function(enabled) escape106Enabled = enabled end)
+scpUpdate()
+
+local statusLabel = Instance.new("TextLabel", ContentFrame)
+statusLabel.Size = UDim2.new(1,-10,0,22)
+statusLabel.Text = "准备就绪"
+statusLabel.BackgroundColor3 = Color3.fromRGB(35,35,35)
+statusLabel.TextColor3 = Color3.new(0.7,0.7,0.7)
+statusLabel.TextSize = 13
+statusLabel.LayoutOrder = 99
+
+setMainExpanded(true)
+
+-- ================= 功能循环 =================
+local function shootPlayer(target)
+    pcall(function() GunShot:FireServer("shoot", shootBuffer, {target.player}, {target.part}) end)
+    if showBeam then showBeamTo(target.part.Position) end
+end
+
+task.spawn(function()
+    while true do
+        if killEnabled then
+            local targets = getTargets()
+            if #targets > 0 then
+                statusLabel.Text = "攻击 " .. #targets .. " 个敌人"
+                for _, t in ipairs(targets) do
+                    shootPlayer(t)
+                    task.wait(shootInterval > 0 and shootInterval or 0.01)
+                end
+            else
+                task.wait(0.05)
+            end
+        else
+            task.wait(0.5)
+        end
+        task.wait(0.05)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if teleportEnabled then
+            local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if myRoot then
+                local targets = getTeleportTargets()
+                if #targets > 0 then
+                    for _, root in ipairs(targets) do
+                        pcall(function() myRoot.CFrame = root.CFrame + Vector3.new(0,-3,0) end)
+                        task.wait(teleportInterval)
+                    end
+                    teleportEnabled = false
+                    teleportBtn.Text = "传送敌人 (SPC): 关闭"
+                    teleportBtn.BackgroundColor3 = Color3.fromRGB(180,80,80)
+                else
+                    teleportEnabled = false
+                    teleportBtn.Text = "传送敌人 (SPC): 关闭"
+                    teleportBtn.BackgroundColor3 = Color3.fromRGB(180,80,80)
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if safeTeleportEnabled then
+            local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if root and (root.Position - safePosition).Magnitude > 10 then
+                pcall(function() root.CFrame = CFrame.new(safePosition) end)
+            end
+        end
+        task.wait(0.5)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if infiniteCloak then
+            pcall(function() CloakEvent:FireServer(true) end)
+            task.wait(0.2)
+        else task.wait(0.5) end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if escape106Enabled then
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                table.insert(positionHistory, root.Position)
+                if #positionHistory > 30 then table.remove(positionHistory, 1) end
+                if (root.Position - ESCAPE_106_POS).Magnitude <= ESCAPE_DISTANCE and #positionHistory > 1 then
+                    pcall(function() root.CFrame = CFrame.new(positionHistory[1]) end)
+                    positionHistory = {}
+                    task.wait(1)
+                end
+            end
+            task.wait(0.1)
+        else
+            positionHistory = {}
+            task.wait(0.5)
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if assist173Enabled then
+            local target = getNearestEnemy()
+            if target and target.Character then
+                local root = target.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    pcall(function() Teleport173:FireServer(root.Position, Vector3.new(0,-1,0).Unit) end)
+                end
+            end
+            task.wait(0.3)
+        else task.wait(0.5) end
+    end
+end)
+
+ScreenGui.Destroying:Connect(function()
+    if beam then beam:Destroy() end
+    if att0 then att0:Destroy() end
+    if att1 then att1:Destroy() end
+end)
+
+print("SCP 脚本最终稳定版已加载")

@@ -1,0 +1,446 @@
+--[[
+    无尽现实脚本
+    作者：jgft616
+    功能：防挂机(自动后台运行) / 移动速度调节 / 玩家透视(全绿，0.1秒刷新) / 怪物透视(事件监听) / 夜视 / 无限金钱 / 穿墙
+    修复：怪物透视不再误高亮玩家
+--]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local Lighting = game:GetService("Lighting")
+local LP = Players.LocalPlayer
+
+local C = {
+    Bg = Color3.fromRGB(18, 18, 25), Bg2 = Color3.fromRGB(25, 25, 35),
+    Acc = Color3.fromRGB(255, 105, 180), Text = Color3.fromRGB(220, 220, 240),
+    Gray = Color3.fromRGB(140, 140, 160), Red = Color3.fromRGB(255, 80, 80),
+    Green = Color3.fromRGB(80, 200, 80),
+}
+
+local function notify(title, msg)
+    pcall(function() StarterGui:SetCore("SendNotification", {Title = title, Text = msg, Duration = 3}) end)
+end
+
+-- 功能开关
+local PlayerESPEnabled = false
+local MonsterESPEnabled = false
+local NightVisionEnabled = false
+local InfiniteMoneyEnabled = false
+local NoclipEnabled = false
+local noclipLoop = nil
+
+-- 速度调节
+local SpeedEnabled = false
+local SpeedValue = 16
+local speedLoop = nil
+
+-- ==================== 防挂机（后台自动运行） ====================
+spawn(function()
+    while task.wait(5) do
+        pcall(function()
+            local char = LP.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum and hum.MoveDirection.Magnitude == 0 then
+                    hum:Move(Vector3.new(0.01, 0, 0))
+                    task.wait(0.01)
+                    hum:Move(Vector3.new(0, 0, 0))
+                end
+            end
+        end)
+    end
+end)
+
+-- ==================== 移动速度 ====================
+local function applySpeed(value)
+    SpeedValue = value
+    if SpeedEnabled then
+        local char = LP.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = value end
+        end
+    end
+end
+
+local function toggleSpeed(on)
+    SpeedEnabled = on
+    if on then
+        applySpeed(SpeedValue)
+        speedLoop = RunService.Heartbeat:Connect(function()
+            if not SpeedEnabled then return end
+            local char = LP.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then hum.WalkSpeed = SpeedValue end
+            end
+        end)
+        notify("移动速度", "✅ 已开启 (" .. SpeedValue .. ")")
+    else
+        if speedLoop then speedLoop:Disconnect(); speedLoop = nil end
+        local char = LP.Character
+        if char then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
+        end
+        notify("移动速度", "已关闭")
+    end
+end
+
+-- ==================== 玩家透视（全绿，无队伍检测，0.1秒刷新） ====================
+local playerESPObjects = {}
+
+local function clearPlayerESP()
+    for _, data in pairs(playerESPObjects) do
+        pcall(function() data.Highlight:Destroy() end)
+        pcall(function() data.Billboard:Destroy() end)
+    end
+    playerESPObjects = {}
+end
+
+local function refreshPlayerESP()
+    if not PlayerESPEnabled then return end
+    for player, data in pairs(playerESPObjects) do
+        if not player.Parent or not player.Character then
+            pcall(function() data.Highlight:Destroy() end)
+            pcall(function() data.Billboard:Destroy() end)
+            playerESPObjects[player] = nil
+        elseif data.Highlight.Adornee ~= player.Character then
+            pcall(function() data.Highlight:Destroy() end)
+            pcall(function() data.Billboard:Destroy() end)
+            playerESPObjects[player] = nil
+        end
+    end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LP then continue end
+        local char = player.Character
+        if not char then continue end
+        local head = char:FindFirstChild("Head")
+        if not head then continue end
+        if not playerESPObjects[player] then
+            local hl = Instance.new("Highlight")
+            hl.FillColor = Color3.fromRGB(0, 255, 0)
+            hl.OutlineColor = Color3.new(1, 1, 1)
+            hl.FillTransparency = 0.5
+            hl.Adornee = char
+            hl.Parent = char
+            local bill = Instance.new("BillboardGui")
+            bill.AlwaysOnTop = true; bill.Size = UDim2.new(0, 100, 0, 30)
+            bill.StudsOffset = Vector3.new(0, 2.5, 0); bill.Adornee = head; bill.Parent = head
+            local txt = Instance.new("TextLabel", bill)
+            txt.BackgroundTransparency = 1; txt.Text = player.Name .. " [玩家]"
+            txt.TextColor3 = Color3.new(1, 1, 1); txt.Font = Enum.Font.SourceSansBold; txt.TextSize = 14
+            playerESPObjects[player] = { Highlight = hl, Billboard = bill }
+        end
+    end
+end
+
+local function togglePlayerESP(on)
+    PlayerESPEnabled = on
+    if on then refreshPlayerESP(); notify("玩家透视", "✅ 已开启（全绿）")
+    else clearPlayerESP(); notify("玩家透视", "已关闭") end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LP then player.CharacterAdded:Connect(function() task.wait(0.1); refreshPlayerESP() end) end
+end
+Players.PlayerAdded:Connect(function(player) player.CharacterAdded:Connect(function() task.wait(0.1); refreshPlayerESP() end) end)
+LP.CharacterAdded:Connect(function() task.wait(0.1); refreshPlayerESP() end)
+spawn(function() while task.wait(0.1) do refreshPlayerESP() end end)
+
+-- ==================== 怪物透视（事件监听，严格排除玩家） ====================
+local monsterESPObjects = {}
+
+-- 判断模型是否为玩家角色（确保不误标记）
+local function isPlayerModel(model)
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character == model then
+            return true
+        end
+    end
+    return false
+end
+
+local function addMonsterESP(model)
+    if monsterESPObjects[model] then return end
+    if isPlayerModel(model) then return end  -- 关键：跳过玩家
+    local head = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
+    if not head then return end
+    local hl = Instance.new("Highlight")
+    hl.FillColor = Color3.fromRGB(255, 0, 0); hl.OutlineColor = Color3.new(1, 1, 1)
+    hl.FillTransparency = 0.5; hl.Adornee = model; hl.Parent = model
+    local bill = Instance.new("BillboardGui")
+    bill.AlwaysOnTop = true; bill.Size = UDim2.new(0, 100, 0, 30)
+    bill.StudsOffset = Vector3.new(0, 2.5, 0); bill.Adornee = head; bill.Parent = head
+    local txt = Instance.new("TextLabel", bill)
+    txt.BackgroundTransparency = 1; txt.Text = model.Name .. " [怪物]"
+    txt.TextColor3 = Color3.new(1, 1, 1); txt.Font = Enum.Font.SourceSansBold; txt.TextSize = 14
+    monsterESPObjects[model] = { Highlight = hl, Billboard = bill }
+end
+
+local function removeMonsterESP(model)
+    local data = monsterESPObjects[model]
+    if data then
+        pcall(function() data.Highlight:Destroy() end)
+        pcall(function() data.Billboard:Destroy() end)
+        monsterESPObjects[model] = nil
+    end
+end
+
+local function onDescendantAdded(descendant)
+    if not MonsterESPEnabled then return end
+    if descendant:IsA("Model") and descendant:FindFirstChildWhichIsA("Humanoid") then
+        addMonsterESP(descendant)
+    end
+end
+
+local function onDescendantRemoving(descendant)
+    if descendant:IsA("Model") then removeMonsterESP(descendant) end
+end
+
+local function toggleMonsterESP(on)
+    MonsterESPEnabled = on
+    if on then
+        -- 扫描现有怪物，并排除玩家
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj:FindFirstChildWhichIsA("Humanoid") and not isPlayerModel(obj) then
+                addMonsterESP(obj)
+            end
+        end
+        workspace.DescendantAdded:Connect(onDescendantAdded)
+        workspace.DescendantRemoving:Connect(onDescendantRemoving)
+        notify("怪物透视", "✅ 已开启")
+    else
+        for model, _ in pairs(monsterESPObjects) do removeMonsterESP(model) end
+        notify("怪物透视", "已关闭")
+    end
+end
+
+-- ==================== 夜视 ====================
+local function toggleNightVision(on)
+    NightVisionEnabled = on
+    if on then
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255); Lighting.Brightness = 3
+        notify("夜视", "✅ 已开启")
+    else
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0); Lighting.Brightness = 1
+        notify("夜视", "已关闭")
+    end
+end
+spawn(function() while task.wait(1) do if NightVisionEnabled then pcall(function() Lighting.Ambient = Color3.fromRGB(255, 255, 255); Lighting.Brightness = 3 end) end end end)
+
+-- ==================== 无限金钱 ====================
+spawn(function()
+    while task.wait(0.5) do
+        if InfiniteMoneyEnabled then
+            pcall(function()
+                local money = LP.leaderstats and LP.leaderstats:FindFirstChild("Money")
+                if money and (money:IsA("IntValue") or money:IsA("NumberValue")) then
+                    money.Value = 999999
+                end
+            end)
+        end
+    end
+end)
+local function toggleInfiniteMoney(on)
+    InfiniteMoneyEnabled = on; notify("无限金钱", on and "✅ 已开启" or "已关闭")
+end
+
+-- ==================== 穿墙 ====================
+local function setCollisions(parts, state)
+    for _, part in ipairs(parts) do
+        if part:IsA("BasePart") then
+            pcall(function() part.CanCollide = state end)
+        end
+    end
+end
+
+local function noclipStep()
+    if not NoclipEnabled then return end
+    local char = LP.Character
+    if char then
+        setCollisions(char:GetDescendants(), false)
+        setCollisions({char}, false)
+    end
+end
+
+local function toggleNoclip(on)
+    NoclipEnabled = on
+    if on then
+        noclipLoop = RunService.Stepped:Connect(noclipStep)
+        notify("穿墙", "✅ 已开启")
+    else
+        if noclipLoop then noclipLoop:Disconnect(); noclipLoop = nil end
+        local char = LP.Character
+        if char then
+            setCollisions(char:GetDescendants(), true)
+            setCollisions({char}, true)
+        end
+        notify("穿墙", "已关闭")
+    end
+end
+
+-- ==================== GUI ====================
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "EndlessRealityGUI"
+Gui.Parent = LP:WaitForChild("PlayerGui")
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 260, 0, 290)
+Main.Position = UDim2.new(0.5, -130, 0.5, -145)
+Main.BackgroundColor3 = C.Bg; Main.BorderSizePixel = 0; Main.Active = true; Main.Draggable = true
+Main.Parent = Gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+local TB = Instance.new("Frame")
+TB.Size = UDim2.new(1, 0, 0, 36); TB.BackgroundColor3 = C.Bg2; TB.BorderSizePixel = 0; TB.Parent = Main
+Instance.new("UICorner", TB).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel", TB)
+Title.Text = "无尽现实脚本  作者: jgft616"; Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
+Title.TextColor3 = C.Text; Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 12, 0, 0); Title.Size = UDim2.new(1, -70, 1, 0); Title.TextXAlignment = 0
+
+local UserName = Instance.new("TextLabel", TB)
+UserName.Text = LP.Name; UserName.Font = Enum.Font.Gotham; UserName.TextSize = 9
+UserName.TextColor3 = C.Gray; UserName.BackgroundTransparency = 1
+UserName.Position = UDim2.new(0, 12, 0, 22); UserName.Size = UDim2.new(0, 100, 0, 12); UserName.TextXAlignment = 0
+
+local MinBtn = Instance.new("TextButton", TB)
+MinBtn.Size = UDim2.new(0, 30, 0, 30); MinBtn.Position = UDim2.new(1, -62, 0, 3); MinBtn.Text = "–"
+MinBtn.Font = Enum.Font.GothamBold; MinBtn.TextSize = 22; MinBtn.TextColor3 = C.Text
+MinBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60); MinBtn.BorderSizePixel = 0
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 5)
+
+local CloseBtn = Instance.new("TextButton", TB)
+CloseBtn.Size = UDim2.new(0, 30, 0, 30); CloseBtn.Position = UDim2.new(1, -30, 0, 3); CloseBtn.Text = "✕"
+CloseBtn.Font = Enum.Font.GothamBold; CloseBtn.TextSize = 16; CloseBtn.TextColor3 = C.Red
+CloseBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60); CloseBtn.BorderSizePixel = 0
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
+
+local MiniDot = Instance.new("TextButton")
+MiniDot.Size = UDim2.new(0, 40, 0, 40); MiniDot.Position = UDim2.new(0, 10, 0, 10)
+MiniDot.BackgroundColor3 = C.Acc; MiniDot.Text = "⚙️"; MiniDot.Font = Enum.Font.GothamBold; MiniDot.TextSize = 20
+MiniDot.TextColor3 = Color3.fromRGB(255, 255, 255); MiniDot.Visible = false; MiniDot.Parent = Gui
+Instance.new("UICorner", MiniDot).CornerRadius = UDim.new(1, 0)
+
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function() minimized = true; Main.Visible = false; MiniDot.Visible = true end)
+MiniDot.MouseButton1Click:Connect(function() minimized = false; Main.Visible = true; MiniDot.Visible = false end)
+CloseBtn.MouseButton1Click:Connect(function()
+    PlayerESPEnabled = false; MonsterESPEnabled = false; NightVisionEnabled = false; InfiniteMoneyEnabled = false; NoclipEnabled = false; SpeedEnabled = false
+    clearPlayerESP()
+    for model, _ in pairs(monsterESPObjects) do removeMonsterESP(model) end
+    if noclipLoop then noclipLoop:Disconnect() end
+    if speedLoop then speedLoop:Disconnect() end
+    Gui:Destroy()
+end)
+
+local Scroll = Instance.new("ScrollingFrame", Main)
+Scroll.Size = UDim2.new(1, -8, 1, -42); Scroll.Position = UDim2.new(0, 4, 0, 40)
+Scroll.BackgroundTransparency = 1; Scroll.ScrollBarThickness = 6; Scroll.ScrollBarImageColor3 = C.Acc
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 0); Scroll.BorderSizePixel = 0
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local yPos = 0
+local function addControl(child, h)
+    h = h or 26
+    child.Parent = Scroll; child.Position = UDim2.new(0, 0, 0, yPos); yPos = yPos + h + 4
+end
+local function addLabel(text)
+    local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1, 0, 0, 18)
+    lbl.BackgroundTransparency = 1; lbl.Text = text
+    lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 12; lbl.TextColor3 = C.Acc; lbl.TextXAlignment = 0
+    addControl(lbl, 18)
+end
+local function addToggle(text, default, callback)
+    local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
+    local label = Instance.new("TextLabel", frame); label.Text = text; label.Font = Enum.Font.Gotham; label.TextSize = 12
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0.65, 0, 1, 0); label.TextXAlignment = 0
+    local btn = Instance.new("TextButton", frame)
+    btn.Size = UDim2.new(0, 44, 1, -4); btn.Position = UDim2.new(0.7, 0, 0, 2)
+    btn.BackgroundColor3 = default and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    btn.Text = default and "ON" or "OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255); btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.BorderSizePixel = 0
+    local on = default
+    btn.MouseButton1Click:Connect(function()
+        on = not on
+        btn.BackgroundColor3 = on and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        btn.Text = on and "ON" or "OFF"
+        callback(on)
+    end)
+    addControl(frame, 26)
+end
+local function addSlider(text, min, max, default, callback)
+    local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, -10, 0, 44); frame.BackgroundTransparency = 1
+    local label = Instance.new("TextLabel", frame); label.Text = text .. ": " .. default
+    label.Font = Enum.Font.Gotham; label.TextSize = 11; label.TextColor3 = C.Text
+    label.BackgroundTransparency = 1; label.Size = UDim2.new(1, 0, 0, 16); label.TextXAlignment = 0
+
+    local sliderBg = Instance.new("Frame", frame); sliderBg.Size = UDim2.new(1, 0, 0, 8)
+    sliderBg.Position = UDim2.new(0, 0, 0, 18); sliderBg.BackgroundColor3 = Color3.fromRGB(50, 50, 60); sliderBg.BorderSizePixel = 0
+    local fill = Instance.new("Frame", sliderBg); fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = C.Acc; fill.BorderSizePixel = 0
+
+    local dragging = false
+    sliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local mousePos = input.Position.X - sliderBg.AbsolutePosition.X
+            local ratio = math.clamp(mousePos / sliderBg.AbsoluteSize.X, 0, 1)
+            local val = math.floor(min + ratio * (max - min) + 0.5)
+            fill.Size = UDim2.new(ratio, 0, 1, 0)
+            label.Text = text .. ": " .. val
+            callback(val)
+        end
+    end)
+    addControl(frame, 44)
+end
+
+-- 分组：主要功能
+addLabel("主要功能")
+addSlider("移动速度", 16, 100, 16, function(val) applySpeed(val) end)
+addToggle("应用速度", false, toggleSpeed)
+addToggle("无限金钱", false, toggleInfiniteMoney)
+addToggle("穿墙", false, toggleNoclip)
+
+-- 分组：视觉
+addLabel("视觉")
+addToggle("玩家高亮", false, togglePlayerESP)
+addToggle("怪物透视", false, toggleMonsterESP)  -- 标题已改为“怪物透视”
+addToggle("夜视", false, toggleNightVision)
+
+-- 悬浮球拖动边界
+local dotDragging, dotStart, dotStartPos
+local screenSize = workspace.CurrentCamera.ViewportSize
+MiniDot.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dotDragging = true; dotStart = input.Position; dotStartPos = MiniDot.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dotDragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dotDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dotStart
+        local newX = math.clamp(dotStartPos.X.Offset + delta.X, 0, screenSize.X - MiniDot.AbsoluteSize.X)
+        local newY = math.clamp(dotStartPos.Y.Offset + delta.Y, 0, screenSize.Y - MiniDot.AbsoluteSize.Y)
+        MiniDot.Position = UDim2.new(0, newX, 0, newY)
+    end
+end)
+
+notify("无尽现实脚本", "防挂机已启用 | 速度可调")
+print("✅ 无尽现实脚本已加载 - 作者 jgft616")

@@ -1,0 +1,316 @@
+--[[
+    数学谋杀案 自动答题脚本 v3.0 最终版
+    作者：jgft616（B站同名）  QQ：2969300867  群：1046798871
+    功能：加载即自动开启自定义答题，后台运行，悬浮球控制显示
+--]]
+
+if shared.MathMurder_Connections then
+    for _, c in ipairs(shared.MathMurder_Connections) do c:Disconnect() end
+    table.clear(shared.MathMurder_Connections)
+end
+local Connections = {}
+shared.MathMurder_Connections = Connections
+
+-- 服务
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Player = Players.LocalPlayer
+
+-- 游戏对象
+local Screen = workspace:WaitForChild("Map"):WaitForChild("Functional"):WaitForChild("Screen")
+local QuestionText = Screen.SurfaceGui.MainFrame.MainGameContainer.MainTxtContainer.QuestionText
+local TypingText = Screen.SurfaceGui.MainFrame.MainGameContainer.MainTxtContainer.TypingText
+local Fill = Screen.SurfaceGui.MainFrame.MainGameContainer.TimerbarContainer.Fill
+local GameEvent = ReplicatedStorage.Events.GameEvent
+local CurrentSpeller = ReplicatedStorage.GameValues.CurrentSpeller
+local ClickSound = ReplicatedStorage.Assets.SFX.Click
+
+-- 默认自动开启
+local CustomEnabled = true
+local CustomDelay = 5
+local TypingSpeed = 0.05
+local BigErrorChance = 0.2
+local InstantSubmit = false
+
+-- 安全输入
+local function SafeUpdateAnswer(text)
+    pcall(function()
+        if ClickSound then ClickSound:Play() end
+        TypingText.Text = text
+        GameEvent:FireServer("updateAnswer", text)
+    end)
+end
+
+-- 模拟打字
+local function HumanType(target)
+    local text = ""
+    while text ~= target do
+        if math.random() < BigErrorChance then
+            local wrong = tostring(math.random(1, 200))
+            SafeUpdateAnswer(wrong)
+            task.wait(0.1 * (1 + math.random()))
+            SafeUpdateAnswer(string.sub(wrong, 1, math.random(0, #wrong)))
+            task.wait(0.1 * (1 + math.random()))
+        end
+        local nextLen = #text + 1
+        text = string.sub(target, 1, nextLen)
+        SafeUpdateAnswer(text)
+        if math.random() < 0.2 then
+            task.wait(TypingSpeed * (2 + math.random() * 2))
+        else
+            task.wait(TypingSpeed * (1 + math.random()))
+        end
+        if InstantSubmit and text == target then
+            pcall(function() GameEvent:FireServer("submitAnswer", text) end)
+            return
+        end
+    end
+    if not InstantSubmit then
+        pcall(function() GameEvent:FireServer("submitAnswer", target) end)
+    end
+end
+
+-- 答案计算
+local function ComputeAnswer(questionStr)
+    local success, result = pcall(function()
+        local expr = string.gsub(questionStr:match("^(.-)=") or "", "x", "*")
+        if expr == "" then return nil end
+        return tostring(loadstring("return " .. expr)())
+    end)
+    return success and result or nil
+end
+
+-- 主逻辑
+local function OnNewQuestion()
+    if not CustomEnabled then return end
+    if CurrentSpeller.Value ~= Player then return end
+    local question = QuestionText.Text
+    if question == "" then return end
+    local answer = ComputeAnswer(question)
+    if not answer then return end
+    pcall(function() Fill:SetAttribute("Answer", answer) end)
+    SafeUpdateAnswer("")
+    task.wait(CustomDelay)
+    HumanType(answer)
+end
+
+table.insert(Connections, QuestionText:GetPropertyChangedSignal("Text"):Connect(OnNewQuestion))
+
+-- ================== GUI（仅标题+参数，自动最小化） ==================
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "MathMurderScript"
+Gui.Parent = Player:WaitForChild("PlayerGui")
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 280, 0, 250)
+MainFrame.Position = UDim2.new(0.5, -140, 0.5, -125)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = Gui
+
+-- 标题栏
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = MainFrame
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -60, 1, 0)
+TitleText.Position = UDim2.new(0, 10, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Font = Enum.Font.GothamBold
+TitleText.Text = "数学谋杀案 作者: jgft616"
+TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
+TitleText.TextSize = 14
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+
+local UserLabel = Instance.new("TextLabel")
+UserLabel.Size = UDim2.new(1, 0, 0, 18)
+UserLabel.Position = UDim2.new(0, 10, 0, 32)
+UserLabel.BackgroundTransparency = 1
+UserLabel.Font = Enum.Font.Gotham
+UserLabel.Text = "欢迎，" .. Player.Name
+UserLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+UserLabel.TextSize = 12
+UserLabel.TextXAlignment = Enum.TextXAlignment.Left
+UserLabel.Parent = MainFrame
+
+-- 最小化按钮
+local MinimizeButton = Instance.new("TextButton")
+MinimizeButton.Size = UDim2.new(0, 24, 0, 24)
+MinimizeButton.Position = UDim2.new(1, -28, 0, 4)
+MinimizeButton.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+MinimizeButton.Text = "_"
+MinimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinimizeButton.Font = Enum.Font.GothamBold
+MinimizeButton.TextSize = 14
+MinimizeButton.BorderSizePixel = 0
+MinimizeButton.Parent = TitleBar
+
+-- 悬浮球
+local minimized = true
+local FloatBall = nil
+
+local function Minimize()
+    minimized = true
+    MainFrame.Visible = false
+    if not FloatBall then
+        FloatBall = Instance.new("TextButton")
+        FloatBall.Size = UDim2.new(0, 50, 0, 50)
+        FloatBall.Position = UDim2.new(0, 10, 0, 10)
+        FloatBall.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+        FloatBall.Text = "📐"
+        FloatBall.TextColor3 = Color3.fromRGB(255, 255, 255)
+        FloatBall.Font = Enum.Font.GothamBold
+        FloatBall.TextSize = 20
+        FloatBall.BorderSizePixel = 0
+        FloatBall.Active = true
+        FloatBall.Draggable = true
+        FloatBall.Parent = Gui
+        FloatBall.MouseButton1Click:Connect(function()
+            minimized = false
+            MainFrame.Visible = true
+            FloatBall:Destroy()
+            FloatBall = nil
+        end)
+    else
+        FloatBall.Visible = true
+    end
+end
+
+local function Restore()
+    minimized = false
+    MainFrame.Visible = true
+    if FloatBall then FloatBall:Destroy(); FloatBall = nil end
+end
+
+MinimizeButton.MouseButton1Click:Connect(function()
+    if minimized then Restore() else Minimize() end
+end)
+
+-- 参数区域
+local ContentFrame = Instance.new("ScrollingFrame")
+ContentFrame.Size = UDim2.new(1, -10, 1, -65)
+ContentFrame.Position = UDim2.new(0, 5, 0, 55)
+ContentFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+ContentFrame.BorderSizePixel = 0
+ContentFrame.ScrollBarThickness = 6
+ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 100)
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 280)
+ContentFrame.Parent = MainFrame
+
+local ContentLayout = Instance.new("UIListLayout")
+ContentLayout.Padding = UDim.new(0, 5)
+ContentLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ContentLayout.Parent = ContentFrame
+
+-- 开关控件
+local function CreateToggle(parent, name, default, callback)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, -10, 0, 30)
+    Frame.BackgroundTransparency = 1
+    Frame.Parent = parent
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(0.6, 0, 1, 0)
+    Label.BackgroundTransparency = 1
+    Label.Text = name
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.Font = Enum.Font.Gotham
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
+
+    local Button = Instance.new("TextButton")
+    Button.Size = UDim2.new(0, 50, 1, -5)
+    Button.Position = UDim2.new(0.7, 0, 0, 2)
+    Button.BackgroundColor3 = default and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    Button.Text = default and "开启" or "关闭"
+    Button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Button.Font = Enum.Font.GothamBold
+    Button.TextSize = 12
+    Button.BorderSizePixel = 0
+    Button.Parent = Frame
+
+    local on = default
+    Button.MouseButton1Click:Connect(function()
+        on = not on
+        Button.BackgroundColor3 = on and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+        Button.Text = on and "开启" or "关闭"
+        callback(on)
+    end)
+end
+
+-- 滑块控件
+local function CreateSlider(parent, name, min, max, default, callback)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, -10, 0, 50)
+    Frame.BackgroundTransparency = 1
+    Frame.Parent = parent
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, 0, 0, 18)
+    Label.BackgroundTransparency = 1
+    Label.Text = name .. ": " .. default
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.Font = Enum.Font.Gotham
+    Label.TextSize = 12
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
+
+    local Slider = Instance.new("Frame")
+    Slider.Size = UDim2.new(1, 0, 0, 10)
+    Slider.Position = UDim2.new(0, 0, 0, 20)
+    Slider.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    Slider.BorderSizePixel = 0
+    Slider.Parent = Frame
+
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    Fill.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+    Fill.BorderSizePixel = 0
+    Fill.Parent = Slider
+
+    local dragging = false
+    Slider.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local pos = input.Position.X - Slider.AbsolutePosition.X
+            local ratio = math.clamp(pos / Slider.AbsoluteSize.X, 0, 1)
+            local val = min + ratio * (max - min)
+            Fill.Size = UDim2.new(ratio, 0, 1, 0)
+            Label.Text = name .. ": " .. math.floor(val*10)/10
+            callback(math.floor(val*10)/10)
+        end
+    end)
+end
+
+-- 参数（默认全部开启并自动运行）
+CreateToggle(ContentFrame, "自定义答题", true, function(val) CustomEnabled = val end)
+CreateSlider(ContentFrame, "在几秒后答题", 1, 9, 5, function(v) CustomDelay = v end)
+CreateSlider(ContentFrame, "打字速度(秒/字)", 0.01, 0.2, 0.05, function(v) TypingSpeed = v end)
+CreateSlider(ContentFrame, "错误概率(%)", 0, 50, 20, function(v) BigErrorChance = v/100 end)
+CreateToggle(ContentFrame, "即时提交", false, function(val) InstantSubmit = val end)
+
+ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 5 * 55)
+
+-- 启动即最小化，自动后台运行
+Minimize()
+
+print("✅ 数学谋杀案：自定义答题已自动启动（后台运行），悬浮球可唤出界面")
