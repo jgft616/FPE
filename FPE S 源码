@@ -1,8 +1,6 @@
 --[[
-    FPE:S 全能脚本
+    FPE:S 紧凑版（修复传送标题显示）
     作者：jgft616
-    功能：最大体力 + 体力恢复 + 通行证 + 防拉回 + 透视（0.1秒刷新） + 队伍检测 + 夜视 + 清除所有特效 + 电立室门删除 + 皮肤商店删除
-    说明：清除特效仅移除画面滤镜/雪花/红色等后期效果，不影响透视与队伍检测
 --]]
 
 local Players = game:GetService("Players")
@@ -25,7 +23,7 @@ local function notify(title, msg)
     pcall(function() StarterGui:SetCore("SendNotification", {Title = title, Text = msg, Duration = 3}) end)
 end
 
--- 功能状态
+-- ========== 功能状态 ==========
 local MaxStaminaEnabled = false
 local MaxStaminaValue = 99999
 local StaminaRecoveryEnabled = false
@@ -34,10 +32,8 @@ local PassesEnabled = { OwnsAlicePass = false, HasVIP = false, HasSwap = false }
 local ESPEnabled = false
 local TeamCheckEnabled = true
 local NightVisionEnabled = false
-local ClearEffectsEnabled = false
-local clearEffectsConn = nil
 
--- 夜视
+-- ========== 夜视 ==========
 local function toggleNightVision(on)
     NightVisionEnabled = on
     if on then
@@ -61,7 +57,7 @@ spawn(function()
     end
 end)
 
--- 队伍检测
+-- ========== 队伍检测 ==========
 local function IsTeammate(player)
     if player == LP then return true end
     if not TeamCheckEnabled then return false end
@@ -85,7 +81,7 @@ local function toggleTeamCheck(on)
     if ESPEnabled then refreshESP() end
 end
 
--- 透视系统
+-- ========== 透视系统 ==========
 local espObjects = {}
 
 local function clearESP()
@@ -174,7 +170,7 @@ local function toggleESP(on)
     end
 end
 
--- 防拉回
+-- ========== 防拉回 ==========
 local PULLBACK_THRESHOLD = 150
 spawn(function()
     local lastPosition = nil
@@ -197,7 +193,7 @@ spawn(function()
     end
 end)
 
--- 应用设置
+-- ========== 应用设置 ==========
 local function applyAllSettings()
     local char = LP.Character
     if char then
@@ -212,7 +208,7 @@ end
 LP.CharacterAdded:Connect(function() task.wait(0.1); applyAllSettings() end)
 spawn(function() while task.wait(0.5) do applyAllSettings() end end)
 
--- 功能控制
+-- ========== 功能控制 ==========
 local function toggleMaxStamina(on)
     MaxStaminaEnabled = on
     if not on then pcall(function() local char = LP.Character; if char then char:SetAttribute("MaxStamina", 100) end end) end
@@ -227,100 +223,62 @@ end
 local function setStaminaRecovery(val) StaminaRecoveryValue = tonumber(val) or StaminaRecoveryValue; if StaminaRecoveryEnabled then applyAllSettings() end end
 local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "✅ 已获取: " .. name) end
 
--- 清除所有特效（不影响透视/队伍检测）
-local function removeAllEffects()
-    for _, obj in ipairs(Lighting:GetChildren()) do
-        if obj:IsA("PostEffect") then
-            pcall(function() obj:Destroy() end)
-        end
-    end
+-- ========== 传送 ==========
+local function teleport(x, y, z)
+    local char = LP.Character
+    if not char then notify("传送失败", "未找到角色"); return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then notify("传送失败", "未找到 HumanoidRootPart"); return end
+    pcall(function() hrp.CFrame = CFrame.new(x, y, z) end)
+    notify("传送", "✅ 已到达")
 end
 
-local function toggleClearEffects(on)
-    ClearEffectsEnabled = on
-    if on then
-        removeAllEffects()
-        if clearEffectsConn then clearEffectsConn:Disconnect() end
-        clearEffectsConn = Lighting.ChildAdded:Connect(function(child)
-            if child:IsA("PostEffect") then
-                pcall(function() child:Destroy() end)
-            end
-        end)
-        notify("清除特效", "✅ 所有后期特效已清除（可能不全但能看见）")
-    else
-        if clearEffectsConn then clearEffectsConn:Disconnect() end
-        notify("清除特效", "已关闭")
-    end
-end
-
--- ==================== 门/皮肤商店删除 ====================
+-- ========== 门删除 ==========
 local function deleteElectricRoomDoor()
     local doors = workspace:FindFirstChild("Area")
     if doors then doors = doors:FindFirstChild("Map") end
     if doors then doors = doors:FindFirstChild("Doors") end
-    if not doors then
-        notify("删除失败", "未找到 Doors")
-        return
-    end
+    if not doors then notify("删除失败", "未找到 Doors"); return end
     local deletedCount = 0
-    local children = doors:GetChildren()
-    for _, child in ipairs(children) do
-        local mesh = child:FindFirstChild("Mesh")
-        if mesh then
+    for _, child in ipairs(doors:GetChildren()) do
+        if child:FindFirstChild("Mesh") then
             pcall(function() child:Destroy() end)
             deletedCount = deletedCount + 1
         end
     end
-    if deletedCount > 0 then
-        notify("电立室门删除", "所有电力室门已删除")
-    else
-        notify("电立室门删除", "未找到包含 Mesh 的门")
-    end
+    notify("电立室门删除", deletedCount > 0 and "所有电力室门已删除" or "未找到包含 Mesh 的门")
 end
 
 local function deleteSkinShop()
     local map = workspace:FindFirstChild("Area")
     if map then map = map:FindFirstChild("Map") end
-    if not map then
-        notify("皮肤商店删除", "未找到 Area/Map")
-        return
-    end
-
+    if not map then notify("皮肤商店删除", "未找到 Area/Map"); return end
     local skinShop = map:FindFirstChild("SkinSelectionShop")
     if skinShop then
-        local locker = skinShop:FindFirstChild("BaseLocker")
-        if locker then pcall(function() locker:Destroy() end) end
-        local shelf = skinShop:FindFirstChild("Shelf")
-        if shelf then pcall(function() shelf:Destroy() end) end
+        pcall(function() skinShop:FindFirstChild("BaseLocker"):Destroy() end)
+        pcall(function() skinShop:FindFirstChild("Shelf"):Destroy() end)
     end
-
     local doors = map:FindFirstChild("Doors")
     if doors then
         local storageDoor = doors:FindFirstChild("StorageDoor")
         if storageDoor then
-            local dd2 = storageDoor:FindFirstChild("DoubleDoor2")
-            if dd2 then pcall(function() dd2:Destroy() end) end
-            local dd = storageDoor:FindFirstChild("DoubleDoor")
-            if dd then pcall(function() dd:Destroy() end) end
+            pcall(function() storageDoor:FindFirstChild("DoubleDoor2"):Destroy() end)
+            pcall(function() storageDoor:FindFirstChild("DoubleDoor"):Destroy() end)
         end
     end
-
     local collisions = map:FindFirstChild("CollisionBoxes")
-    if collisions then
-        local col = collisions:FindFirstChild("StorageDoorCollision")
-        if col then pcall(function() col:Destroy() end) end
-    end
-
-    notify("皮肤商店删除", "✅ 已删除所有皮肤商店相关对象（只有夜晚才有用）")
+    if collisions then pcall(function() collisions:FindFirstChild("StorageDoorCollision"):Destroy() end) end
+    notify("皮肤商店删除", "✅ 已删除所有皮肤商店相关对象")
 end
 
--- ==================== UI ====================
+-- ==================== GUI ====================
 local guiParent = LP:WaitForChild("PlayerGui")
 local gui = Instance.new("ScreenGui", guiParent)
 gui.Name = "FPES_Final"; gui.ResetOnSpawn = false
 
 local main = Instance.new("Frame", gui)
-main.Size = UDim2.new(0, 260, 0, 400); main.Position = UDim2.new(0.5, -130, 0.45, -200)
+main.Size = UDim2.new(0, 280, 0, 380)
+main.Position = UDim2.new(0.5, -140, 0.45, -190)
 main.BackgroundColor3 = C.Bg; main.BorderSizePixel = 0; main.Active = true
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
 
@@ -364,98 +322,278 @@ closeBtn.MouseButton1Click:Connect(function()
     for k in pairs(PassesEnabled) do PassesEnabled[k] = false end
     ESPEnabled = false; clearESP()
     if NightVisionEnabled then toggleNightVision(false) end
-    if ClearEffectsEnabled then toggleClearEffects(false) end
     applyAllSettings(); gui:Destroy()
 end)
 
--- 滚动框架（修复滚动到底问题）
+-- 滚动框架
 local scroll = Instance.new("ScrollingFrame", main)
 scroll.Size = UDim2.new(1, -8, 1, -42); scroll.Position = UDim2.new(0, 4, 0, 40)
 scroll.BackgroundTransparency = 1; scroll.ScrollBarThickness = 6; scroll.ScrollBarImageColor3 = C.Acc
-scroll.CanvasSize = UDim2.new(0, 0, 0, 0); scroll.BorderSizePixel = 0
-scroll.AutomaticCanvasSize = Enum.AutomaticSize.None  -- 手动控制，确保所有控件可见
+scroll.BorderSizePixel = 0
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.None
 
-local yPos = 0
-local function addControl(child, customHeight)
-    local h = customHeight or 26
-    child.Parent = scroll; child.Position = UDim2.new(0, 0, 0, yPos); yPos = yPos + h + 4
-    scroll.CanvasSize = UDim2.new(0, 0, 0, yPos + 10)  -- 每次都增大画布
+local listLayout = Instance.new("UIListLayout", scroll)
+listLayout.Padding = UDim.new(0, 2)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function updateCanvas()
+    local totalHeight = 0
+    local visibleCount = 0
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("GuiObject") and child.Visible then
+            totalHeight = totalHeight + child.AbsoluteSize.Y
+            visibleCount = visibleCount + 1
+        end
+    end
+    if visibleCount > 1 then
+        totalHeight = totalHeight + listLayout.Padding.Offset * (visibleCount - 1)
+    end
+    scroll.CanvasSize = UDim2.new(0, 0, 0, totalHeight + 8)
 end
+
+-- 紧凑控件函数
 local function addLabel(text)
-    local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1, 0, 0, 18); lbl.BackgroundTransparency = 1
-    lbl.Text = text; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 12; lbl.TextColor3 = C.Acc; lbl.TextXAlignment = 0
-    addControl(lbl, 18)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 16)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 11
+    lbl.TextColor3 = C.Acc
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = scroll
+    updateCanvas()
 end
+
 local function addToggleWithInput(labelText, defaultVal, toggleCallback, inputCallback)
-    local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
-    local label = Instance.new("TextLabel", frame); label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
-    label.TextColor3 = C.Text; label.BackgroundTransparency = 1; label.Size = UDim2.new(0, 95, 1, 0); label.TextXAlignment = 0
-    local input = Instance.new("TextBox", frame); input.Size = UDim2.new(1, -145, 0, 22); input.Position = UDim2.new(0, 97, 0, 2)
-    input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal); input.Font = Enum.Font.Gotham; input.TextSize = 10
-    input.TextColor3 = C.Text; input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 22)
+    frame.BackgroundTransparency = 1
+    frame.Parent = scroll
+
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 10
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0, 90, 1, 0); label.TextXAlignment = 0
+
+    local input = Instance.new("TextBox", frame)
+    input.Size = UDim2.new(1, -140, 0, 18); input.Position = UDim2.new(0, 92, 0, 2)
+    input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal)
+    input.Font = Enum.Font.Gotham; input.TextSize = 10; input.TextColor3 = C.Text
+    input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
     Instance.new("UICorner", input).CornerRadius = UDim.new(0, 4)
-    local switch = Instance.new("TextButton", frame); switch.Size = UDim2.new(0, 38, 0, 18); switch.Position = UDim2.new(1, -42, 0.5, -9)
+
+    local switch = Instance.new("TextButton", frame)
+    switch.Size = UDim2.new(0, 34, 0, 16); switch.Position = UDim2.new(1, -38, 0.5, -8)
     switch.BackgroundColor3 = C.Gray; switch.Text = ""; switch.AutoButtonColor = false
     Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
-    local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 14, 0, 14); knob.Position = UDim2.new(0, 2, 0.5, -7)
-    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch)
+    knob.Size = UDim2.new(0, 12, 0, 12); knob.Position = UDim2.new(0, 2, 0.5, -6)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
     local state = false
     switch.MouseButton1Click:Connect(function()
-        state = not state; switch.BackgroundColor3 = state and C.Green or C.Gray
-        knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+        state = not state
+        switch.BackgroundColor3 = state and C.Green or C.Gray
+        knob.Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
         if toggleCallback then toggleCallback(state) end
         if state and inputCallback then inputCallback(input.Text) end
     end)
     input:GetPropertyChangedSignal("Text"):Connect(function()
         if state and inputCallback then inputCallback(input.Text) end
     end)
-    addControl(frame, 26)
+    updateCanvas()
 end
+
 local function addToggle(labelText, default, callback)
-    local frame = Instance.new("Frame"); frame.Size = UDim2.new(1, 0, 0, 26); frame.BackgroundTransparency = 1
-    local label = Instance.new("TextLabel", frame); label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 12
-    label.TextColor3 = C.Text; label.BackgroundTransparency = 1; label.Size = UDim2.new(0, 140, 1, 0); label.TextXAlignment = 0
-    local switch = Instance.new("TextButton", frame); switch.Size = UDim2.new(0, 40, 0, 20); switch.Position = UDim2.new(1, -44, 0.5, -10)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 22)
+    frame.BackgroundTransparency = 1
+    frame.Parent = scroll
+
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0, 135, 1, 0); label.TextXAlignment = 0
+
+    local switch = Instance.new("TextButton", frame)
+    switch.Size = UDim2.new(0, 36, 0, 18); switch.Position = UDim2.new(1, -40, 0.5, -9)
     switch.BackgroundColor3 = default and C.Green or C.Gray; switch.Text = ""; switch.AutoButtonColor = false
     Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
-    local knob = Instance.new("Frame", switch); knob.Size = UDim2.new(0, 16, 0, 16)
-    knob.Position = default and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
-    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255); Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch)
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Position = default and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
     local state = default or false
     switch.MouseButton1Click:Connect(function()
-        state = not state; switch.BackgroundColor3 = state and C.Green or C.Gray
-        knob.Position = state and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+        state = not state
+        switch.BackgroundColor3 = state and C.Green or C.Gray
+        knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
         if callback then callback(state) end
     end)
-    addControl(frame, 26)
+    updateCanvas()
 end
+
 local function addButton(text, callback)
-    local btn = Instance.new("TextButton"); btn.Size = UDim2.new(1, 0, 0, 30); btn.BackgroundColor3 = C.Acc
-    btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 12; btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.AutoButtonColor = false; Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 26)
+    btn.BackgroundColor3 = C.Acc
+    btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.AutoButtonColor = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     btn.MouseButton1Click:Connect(function()
         btn.BackgroundColor3 = C.Green; btn.Text = "✅ " .. text; callback()
         task.wait(1.5); btn.BackgroundColor3 = C.Acc; btn.Text = text
     end)
-    addControl(btn, 30)
+    btn.Parent = scroll
+    updateCanvas()
 end
 
--- 构建UI内容
+-- ====== 构建分组 ======
 addLabel("体力")
 addToggleWithInput("最大体力", 99999, toggleMaxStamina, setMaxStamina)
 addToggleWithInput("体力恢复", 99999, toggleStaminaRecovery, setStaminaRecovery)
+
 addLabel("视觉")
 addToggle("透视开关", false, toggleESP)
 addToggle("队伍检测", true, toggleTeamCheck)
 addToggle("夜视", false, toggleNightVision)
-addToggle("清除所有特效（清除不全但也能看见）", false, toggleClearEffects)
+
 addLabel("通行证")
 addButton("获取爱丽丝通行证", function() getPass("爱丽丝通行证", "OwnsAlicePass") end)
 addButton("获取 VIP", function() getPass("VIP", "HasVIP") end)
 addButton("获取交换通行证", function() getPass("交换通行证", "HasSwap") end)
+
+-- ====== 传送组 ======
+addLabel("传送")
+
+local listExpanded = false
+local listToggle = Instance.new("TextButton")
+listToggle.Size = UDim2.new(1, 0, 0, 20)
+listToggle.BackgroundColor3 = C.Bg2
+listToggle.Font = Enum.Font.GothamBold; listToggle.TextSize = 10
+listToggle.TextColor3 = C.Text; listToggle.Text = "▶ 选择地点"; listToggle.AutoButtonColor = false
+Instance.new("UICorner", listToggle).CornerRadius = UDim.new(0, 4)
+listToggle.Parent = scroll
+
+local listContent = Instance.new("Frame")
+listContent.BackgroundTransparency = 1; listContent.Size = UDim2.new(1, 0, 0, 0); listContent.Visible = false
+listContent.Parent = scroll
+
+local teleListFrame = Instance.new("Frame", listContent)
+teleListFrame.Size = UDim2.new(1, 0, 0, 100)
+teleListFrame.BackgroundColor3 = Color3.fromRGB(35,35,45); teleListFrame.BorderSizePixel = 0
+Instance.new("UICorner", teleListFrame).CornerRadius = UDim.new(0, 6)
+
+local teleScroll = Instance.new("ScrollingFrame", teleListFrame)
+teleScroll.Size = UDim2.new(1, -4, 1, -4); teleScroll.Position = UDim2.new(0, 2, 0, 2)
+teleScroll.BackgroundTransparency = 1; teleScroll.ScrollBarThickness = 4
+teleScroll.ScrollBarImageColor3 = C.Acc; teleScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+teleScroll.BorderSizePixel = 0
+
+local teleScrollLayout = Instance.new("UIListLayout", teleScroll)
+teleScrollLayout.Padding = UDim.new(0, 1); teleScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local teleButtons = {}
+local selectedCoords, selectedName = nil, ""
+
+local function collapseTeleport()
+    if listExpanded then
+        listExpanded = false
+        listContent.Visible = false
+        listContent.Size = UDim2.new(1, 0, 0, 0)
+        if selectedName then
+            listToggle.Text = selectedName
+        else
+            listToggle.Text = "▶ 选择地点"
+        end
+        updateCanvas()
+    end
+end
+
+local telePoints = {
+    { name = "不知名教室", x = -336.05, y = 104.10, z = 385.26 },
+    { name = "数学老师教室", x = -284.62, y = 104.10, z = 386.15 },
+    { name = "物理老师教室", x = -176.89, y = 104.10, z = 386.20 },
+    { name = "语文老师教室", x = -150.14, y = 107.33, z = 386.77 },
+    { name = "大厅", x = -205.56, y = 104.10, z = 215.44 },
+    { name = "室外", x = -213.53, y = 104.10, z = 141.15 },
+    { name = "食堂", x = -334.64, y = 106.82, z = 169.27 },
+    { name = "皮肤商店", x = -310.66, y = 104.10, z = 287.00 },
+    { name = "游泳馆", x = -269.57, y = 104.10, z = 35.32 },
+    { name = "篮球场", x = -206.52, y = 104.15, z = -32.19 },
+    { name = "二楼电力室", x = -163.99, y = 118.95, z = 262.55 },
+    { name = "二楼楼梯下电力室", x = -287.89, y = 118.95, z = 139.19 },
+    { name = "篮球场旁边电力室", x = -244.22, y = 105.15, z = -95.36 },
+    { name = "爱丽丝旁边电力室", x = -307.46, y = 105.15, z = 328.19 },
+}
+
+for _, tp in ipairs(telePoints) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 18)
+    btn.BackgroundColor3 = C.Acc; btn.Font = Enum.Font.Gotham; btn.TextSize = 10
+    btn.TextColor3 = Color3.fromRGB(255,255,255); btn.Text = tp.name; btn.AutoButtonColor = false
+    btn.Parent = teleScroll; teleButtons[btn] = tp
+
+    btn.MouseButton1Click:Connect(function()
+        for b, _ in pairs(teleButtons) do b.BackgroundColor3 = C.Acc end
+        btn.BackgroundColor3 = C.Green
+        selectedCoords = Vector3.new(tp.x, tp.y, tp.z)
+        selectedName = tp.name
+        if selectedLabel then selectedLabel.Text = "已选择: " .. selectedName end
+        collapseTeleport()
+    end)
+end
+
+local teleBtn = Instance.new("TextButton")
+teleBtn.Size = UDim2.new(1, 0, 0, 26)
+teleBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+teleBtn.Text = "传送"; teleBtn.Font = Enum.Font.GothamBold; teleBtn.TextSize = 11
+teleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+Instance.new("UICorner", teleBtn).CornerRadius = UDim.new(0, 6)
+teleBtn.Parent = scroll
+
+teleBtn.MouseButton1Click:Connect(function()
+    if selectedCoords then teleport(selectedCoords.X, selectedCoords.Y, selectedCoords.Z)
+    else notify("未选择", "请先选择一个传送点") end
+end)
+
+local selectedLabel = Instance.new("TextLabel")
+selectedLabel.Size = UDim2.new(1, 0, 0, 12)
+selectedLabel.BackgroundTransparency = 1; selectedLabel.Font = Enum.Font.Gotham; selectedLabel.TextSize = 10
+selectedLabel.TextColor3 = C.Gray; selectedLabel.Text = "未选择"; selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.Parent = scroll
+
+listToggle.MouseButton1Click:Connect(function()
+    listExpanded = not listExpanded
+    if listExpanded then
+        listContent.Visible = true
+        listContent.Size = UDim2.new(1, 0, 0, teleListFrame.Size.Y.Offset)
+        if selectedName then
+            listToggle.Text = "▼ " .. selectedName
+        else
+            listToggle.Text = "▼ 选择地点"
+        end
+    else
+        if selectedName then
+            listToggle.Text = selectedName
+        else
+            listToggle.Text = "▶ 选择地点"
+        end
+        listContent.Visible = false
+        listContent.Size = UDim2.new(1, 0, 0, 0)
+    end
+    updateCanvas()
+end)
+
 addLabel("删除")
 addButton("电立室门删除", deleteElectricRoomDoor)
 addButton("皮肤商店删除（只有夜晚才有用）", deleteSkinShop)
+
+updateCanvas()
 
 -- 拖动系统
 local dragging, dragStart, startPos
@@ -491,4 +629,5 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-notify("FPE:S", "体力 | 视觉 | 通行证 | 删除 | 清除特效")
+notify("FPE:S", "选择地点后标题会显示地图名")
+print("✅ FPE:S 脚本已更新 - 作者 jgft616")
