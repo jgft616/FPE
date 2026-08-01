@@ -1,0 +1,411 @@
+--[[
+    终极战场 旧版紧凑平铺（修复标题 + 悬浮球左上角）
+    作者：jgft616
+    功能：所有功能完整
+--]]
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local StarterGui = game:GetService("StarterGui")
+local LP = Players.LocalPlayer
+local RS = game:GetService("ReplicatedStorage")
+local Settings = RS.Settings
+local Cooldowns = Settings.Cooldowns
+local Multipliers = Settings.Multipliers
+local Toggles = Settings.Toggles
+local Remotes = RS.Remotes
+local Core = require(RS:WaitForChild("Core"))
+
+-- 默认值备份
+local defaults = {
+    DashCD = Cooldowns.Dash.Value, MeleeCD = Cooldowns.Melee.Value, WallComboCD = Cooldowns.WallCombo.Value,
+    AbilityCD = Cooldowns.Ability.Value, DisableHitStun = Toggles.DisableHitStun.Value,
+    NoStunOnMiss = Toggles.NoStunOnMiss.Value, RagdollTimer = Multipliers.RagdollTimer.Value,
+    InstantTransformation = Toggles.InstantTransformation.Value, MeleeDamage = Multipliers.MeleeDamage.Value,
+    RagdollPower = Multipliers.RagdollPower.Value, NoSlowdowns = Toggles.NoSlowdowns.Value,
+    UltimateTimer = Multipliers.UltimateTimer.Value, DisableIntros = Toggles.DisableIntros.Value
+}
+
+-- 全局状态
+local killAuraActive, fakeBlockEnabled, emoteClaimActive, wallComboEnabled, crashActive = false, false, false, false, false
+local fakeBlockConn
+local hitboxCfg = {X=150, Y=150, Z=150, Enabled=false}
+local lockTarget = ""; local lockBehind, lockCircle, lockLook = false, false, false
+local selectedEmote = ""; local emoteAura, emoteSpam = false, false
+local emoteAuraDelay, emoteSpamDelay = 0.5, 0.5
+
+local function notify(t,m) pcall(function() StarterGui:SetCore("SendNotification",{Title=t,Text=m,Duration=3}) end) end
+
+-- 假防
+local function startFakeBlock()
+    fakeBlockConn = RunService.Heartbeat:Connect(function()
+        if not fakeBlockEnabled then return end
+        pcall(function() Remotes.Combat.Block:FireServer(true) end)
+    end)
+end
+
+-- 杀戮光环
+local function killAuraLoop()
+    while killAuraActive do task.wait(0.03) pcall(function()
+        local char=LP.Character; if not char then return end; local myRoot=char:FindFirstChild("HumanoidRootPart"); if not myRoot then return end
+        local ability=RS.Characters[LP.Data.Character.Value].WallCombo; local targets={}
+        for _,p in ipairs(Players:GetPlayers()) do if p~=LP and p.Character then local hrp=p.Character:FindFirstChild("HumanoidRootPart"); if hrp and (hrp.Position-myRoot.Position).Magnitude<60 then table.insert(targets,p.Character) end end end
+        if #targets>0 then Remotes.Abilities.Ability:FireServer(ability,69); Remotes.Combat.Action:FireServer(ability,"",4,69,{BestHitCharacter=nil,HitCharacters=targets,Ignore={},Actions={}}) end
+    end) end
+end
+
+-- 卡服
+local function crashServerLoop()
+    while crashActive do
+        for _=1,5 do task.spawn(function() pcall(function() local ability=RS.Characters[LP.Data.Character.Value].WallCombo; Remotes.Abilities.Ability:FireServer(ability,33036); Remotes.Combat.Action:FireServer(ability,"",1,33036,{BestHitCharacter=nil,HitCharacters={},Ignore={},Actions={}}) end) end) end
+        task.wait(0.01)
+    end
+end
+
+-- 墙打秒杀
+local function wallComboLoop()
+    while wallComboEnabled do task.wait(0.02) pcall(function()
+        local char=LP.Character; if not char then return end; local head=char:FindFirstChild("Head"); if not head then return end
+        Core.Get("Combat","Ability").Activate(RS.Characters[LP.Data.Character.Value].WallCombo,{head.Position+Vector3.new(0,0,2.5)})
+    end) end
+end
+
+-- 表情光环
+local function emoteAuraLoop()
+    while emoteAura do task.wait(emoteAuraDelay) pcall(function()
+        if selectedEmote~="" then Core.Get("Combat","Ability").Activate(RS.Cosmetics.KillEmote[selectedEmote], LP.Character) end
+    end) end
+end
+
+-- 碰撞箱
+local hitboxOrigBox
+local function toggleHitbox(on)
+    hitboxCfg.Enabled=on; local hit = Core.Get("Combat","Hit")
+    if on then
+        if not hitboxOrigBox then hitboxOrigBox=hit.Box end
+        hit.Box = function(_,char,data) data=data or{}; data.Size=Vector3.new(hitboxCfg.X,hitboxCfg.Y,hitboxCfg.Z); return hitboxOrigBox(nil,char,data) end
+    else
+        if hitboxOrigBox then hit.Box=hitboxOrigBox end
+    end
+end
+
+-- 锁人
+local function lockUpdate()
+    if lockTarget=="" then return end
+    local target; for _,p in ipairs(Players:GetPlayers()) do if p.Name==lockTarget then target=p break end end
+    if not target or not target.Character then return end
+    local tRoot=target.Character:FindFirstChild("HumanoidRootPart"); local mRoot=LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not tRoot or not mRoot then return end
+    local targetPos=tRoot.Position; local finalPos=nil
+    if lockCircle then local a=tick()*13; finalPos=targetPos+Vector3.new(math.cos(a)*6,0,math.sin(a)*6)
+    elseif lockBehind then finalPos=targetPos-tRoot.CFrame.LookVector*5 end
+    if finalPos then
+        if lockLook then mRoot.CFrame=CFrame.new(finalPos,Vector3.new(targetPos.X,finalPos.Y,targetPos.Z))
+        else mRoot.CFrame=CFrame.new(finalPos)*mRoot.CFrame.Rotation end
+    elseif lockLook then mRoot.CFrame=CFrame.new(mRoot.Position,Vector3.new(targetPos.X,mRoot.Position.Y,targetPos.Z)) end
+end
+
+-- ==================== UI 构建 ====================
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "KanlOld"
+Gui.Parent = LP:WaitForChild("PlayerGui")
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 280, 0, 400)
+Main.Position = UDim2.new(0.5, -140, 0.5, -200)
+Main.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Visible = false
+Main.Parent = Gui
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 28)
+TitleBar.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = Main
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -35, 1, 0)
+Title.Position = UDim2.new(0, 8, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.Text = "作者: jgft616 不是作者自己做的是缝合的"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 11
+Title.TextXAlignment = 0
+Title.Parent = TitleBar
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 22, 0, 22)
+CloseBtn.Position = UDim2.new(1, -26, 0, 3)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+CloseBtn.Text = "✕"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 14
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Parent = TitleBar
+CloseBtn.MouseButton1Click:Connect(function() Main.Visible = false end)
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1, -8, 1, -34)
+Scroll.Position = UDim2.new(0, 4, 0, 30)
+Scroll.BackgroundTransparency = 1
+Scroll.ScrollBarThickness = 5
+Scroll.ScrollBarImageColor3 = Color3.fromRGB(100, 100, 120)
+Scroll.BorderSizePixel = 0
+Scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Scroll.Parent = Main
+
+local Layout = Instance.new("UIListLayout", Scroll)
+Layout.Padding = UDim.new(0, 2)
+Layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+-- 悬浮球（左上角）
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 44, 0, 44)
+ToggleBtn.Position = UDim2.new(0, 10, 0, 10)  -- 左上角
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+ToggleBtn.Text = "⚔️"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.TextSize = 18
+ToggleBtn.BorderSizePixel = 0
+ToggleBtn.Active = true
+ToggleBtn.Draggable = true
+ToggleBtn.Parent = Gui
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 10)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    Main.Visible = not Main.Visible
+end)
+
+-- 控件函数
+local function addLabel(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -10, 0, 14)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 10
+    lbl.TextColor3 = Color3.fromRGB(255, 105, 180)
+    lbl.Parent = Scroll
+end
+
+local function addToggle(text, default, callback)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -10, 0, 18)
+    f.BackgroundTransparency = 1
+    f.Parent = Scroll
+
+    local label = Instance.new("TextLabel", f)
+    label.Size = UDim2.new(0.65, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 10
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+    local btn = Instance.new("TextButton", f)
+    btn.Size = UDim2.new(0, 44, 1, -2)
+    btn.Position = UDim2.new(0.7, 0, 0, 1)
+    btn.BackgroundColor3 = default and Color3.fromRGB(0,170,0) or Color3.fromRGB(170,0,0)
+    btn.Text = default and "ON" or "OFF"
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 10
+    btn.BorderSizePixel = 0
+
+    local on = default
+    btn.MouseButton1Click:Connect(function()
+        on = not on
+        btn.BackgroundColor3 = on and Color3.fromRGB(0,170,0) or Color3.fromRGB(170,0,0)
+        btn.Text = on and "ON" or "OFF"
+        callback(on)
+    end)
+end
+
+local function addSlider(text, min, max, default, callback)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -10, 0, 28)
+    f.BackgroundTransparency = 1
+    f.Parent = Scroll
+
+    local label = Instance.new("TextLabel", f)
+    label.Size = UDim2.new(1, 0, 0, 10)
+    label.BackgroundTransparency = 1
+    label.Text = text .. ": " .. default
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 9
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+
+    local s = Instance.new("Frame", f)
+    s.Size = UDim2.new(1, 0, 0, 6)
+    s.Position = UDim2.new(0, 0, 0, 11)
+    s.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    s.BorderSizePixel = 0
+
+    local fill = Instance.new("Frame", s)
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+    fill.BorderSizePixel = 0
+
+    local dragging = false
+    s.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local pos = i.Position.X - s.AbsolutePosition.X
+            local ratio = math.clamp(pos / s.AbsoluteSize.X, 0, 1)
+            local val = math.floor(min + ratio * (max - min) + 0.5)
+            fill.Size = UDim2.new(ratio, 0, 1, 0)
+            label.Text = text .. ": " .. val
+            callback(val)
+        end
+    end)
+end
+
+local function addInput(placeholder, default, callback)
+    local box = Instance.new("TextBox")
+    box.Size = UDim2.new(1, -10, 0, 16)
+    box.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    box.Text = default
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 9
+    box.TextColor3 = Color3.fromRGB(255, 255, 255)
+    box.PlaceholderText = placeholder
+    box.BorderSizePixel = 0
+    Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+    box.Parent = Scroll
+    box.FocusLost:Connect(function() callback(box.Text) end)
+end
+
+local function addButton(text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -10, 0, 20)
+    btn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 10
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    btn.MouseButton1Click:Connect(callback)
+    btn.Parent = Scroll
+end
+
+-- ===== 功能列表 =====
+addLabel("战斗修改")
+addToggle("侧闪无冷却", false, function(s) Cooldowns.Dash.Value = s and 1 or defaults.DashCD end)
+addToggle("近战无冷却", false, function(s) Cooldowns.Melee.Value = s and 1 or defaults.MeleeCD end)
+addToggle("墙打无冷却", false, function(s) Cooldowns.WallCombo.Value = s and 0 or defaults.WallComboCD end)
+addToggle("技能无冷却(宿傩)", false, function(s) Cooldowns.Ability.Value = s and 1 or defaults.AbilityCD end)
+addToggle("取消硬直", false, function(s) Toggles.DisableHitStun.Value = s end)
+addToggle("普攻无僵直", false, function(s) Toggles.NoStunOnMiss.Value = s end)
+addToggle("防布娃娃", false, function(s) Multipliers.RagdollTimer.Value = s and 0.5 or defaults.RagdollTimer end)
+addToggle("秒开大", false, function(s) Toggles.InstantTransformation.Value = s end)
+addToggle("一拳倒地", false, function(s) Multipliers.MeleeDamage.Value = s and 1000000 or defaults.MeleeDamage end)
+addToggle("一拳击飞", false, function(s) Multipliers.RagdollPower.Value = s and 10000 or defaults.RagdollPower end)
+addToggle("无减速", false, function(s) Toggles.NoSlowdowns.Value = s end)
+addToggle("延长大招时间", false, function(s) Multipliers.UltimateTimer.Value = s and 100000 or defaults.UltimateTimer end)
+addToggle("跳过开场动作", false, function(s) Toggles.DisableIntros.Value = s end)
+
+addLabel("其他")
+addToggle("假防", false, function(s) fakeBlockEnabled = s; if s then startFakeBlock() else if fakeBlockConn then fakeBlockConn:Disconnect() end end end)
+addToggle("自动签到表情", false, function(s) emoteClaimActive = s; if s then spawn(function() while emoteClaimActive do Remotes.Combat.EmoteClaim:FireServer(); task.wait() end end) end end)
+addToggle("ping乱码", false, function(s)
+    local ping = LP:WaitForChild("Info"):WaitForChild("Ping")
+    if s then spawn(function() while s do for i=0,999,25 do ping.Value=i; task.wait(0.03) end for i=999,0,-25 do ping.Value=i; task.wait(0.03) end end end) end end)
+addToggle("隐身", false, function(s)
+    if s then
+        local char = LP.Character; if not char then return end
+        local hrp = char:WaitForChild("HumanoidRootPart"); local origCF = hrp.CFrame
+        hrp.CFrame = origCF + Vector3.new(0, -50, 0)
+        local plat = Instance.new("Part", workspace); plat.Size = Vector3.new(10,1,10); plat.Position = hrp.Position; plat.Anchored = true; plat.CanCollide = true
+        spawn(function() while s do task.wait() end plat:Destroy(); hrp.CFrame = origCF end)
+    end
+end)
+addToggle("范围显示", false, function(s)
+    if s then
+        local parts = {}; local conn
+        conn = RunService.RenderStepped:Connect(function()
+            local char = LP.Character; if not char then return end; local root = char:FindFirstChild("HumanoidRootPart"); if not root then return end
+            for _,p in ipairs(parts) do p:Destroy() end; parts = {}
+            for i=1,30 do local a=i/30*math.pi*2; local part=Instance.new("Part",workspace); part.Size=Vector3.new(0.2,0.2,4); part.Anchored=true; part.CanCollide=false; part.Position=root.Position+Vector3.new(math.cos(a)*60,0,math.sin(a)*60); part.Color=Color3.fromHSV(tick()%1,1,1); table.insert(parts,part) end
+        end)
+        spawn(function() while s do task.wait() end conn:Disconnect(); for _,p in ipairs(parts) do p:Destroy() end end)
+    end
+end)
+addButton("删除墙打特效", function()
+    for _,p in ipairs({RS.Characters.Gon.WallCombo.GonWallCombo,RS.Characters.Mob.WallCombo.MobWallCombo,RS.Characters.Nanami.WallCombo.NanamiWallCombo,RS.Characters.Stark.WallCombo.StarkWallCombo,RS.Characters.Sukuna.WallCombo.SukunaTransformWallCombo,RS.Characters.Sukuna.WallCombo.SukunaWallCombo}) do for _,c in ipairs(p:GetChildren()) do c:Destroy() end end
+end)
+addButton("删除击杀表情特效", function()
+    for _,c in ipairs(RS.Cosmetics.KillEmote:GetDescendants()) do if c:IsA("ParticleEmitter") or c:IsA("Trail") then c:Destroy() end end
+end)
+addToggle("大招多次使用", false, function(s) Toggles.MultiUseCutscenes.Value = s end)
+
+addLabel("暴力功能")
+addToggle("无敌/卡服 (高频)", false, function(s) crashActive = s; if s then spawn(crashServerLoop) end end)
+addToggle("杀戮光环", false, function(s) killAuraActive = s; if s then spawn(killAuraLoop) end end)
+addToggle("墙打秒杀", false, function(s) wallComboEnabled = s; if s then spawn(wallComboLoop) end end)
+addButton("卡服(一次性)", function()
+    spawn(function() for _=1,2000 do task.spawn(function() pcall(function() local ability=RS.Characters[LP.Data.Character.Value].WallCombo; Remotes.Abilities.Ability:FireServer(ability,33036); Remotes.Combat.Action:FireServer(ability,"",1,33036,{BestHitCharacter=nil,HitCharacters={},Ignore={},Actions={}}) end) end) end end)
+end)
+
+addLabel("碰撞箱")
+addToggle("碰撞箱扩大", false, function(s) toggleHitbox(s) end)
+addInput("碰撞箱X", "150", function(v) hitboxCfg.X = tonumber(v) or 150 end)
+addInput("碰撞箱Y", "150", function(v) hitboxCfg.Y = tonumber(v) or 150 end)
+addInput("碰撞箱Z", "150", function(v) hitboxCfg.Z = tonumber(v) or 150 end)
+
+addLabel("锁人")
+addInput("目标玩家名", "", function(v) lockTarget = v end)
+addToggle("锁背", false, function(s) lockBehind = s end)
+addToggle("转圈", false, function(s) lockCircle = s end)
+addToggle("看着玩家", false, function(s) lockLook = s end)
+
+addLabel("击杀表情")
+addInput("表情名", "", function(v) selectedEmote = v end)
+addToggle("表情光环", false, function(s) emoteAura = s; if s then spawn(emoteAuraLoop) end end)
+addSlider("光环间隔", 0.1, 5, 0.5, function(v) emoteAuraDelay = v end)
+addToggle("持续发送", false, function(s) emoteSpam = s; if s then spawn(function() while emoteSpam do if selectedEmote ~= "" then Core.Get("Combat","Ability").Activate(RS.Cosmetics.KillEmote[selectedEmote], LP.Character) end; task.wait(emoteSpamDelay) end end) end end)
+addSlider("发送速度", 0.1, 5, 0.5, function(v) emoteSpamDelay = v end)
+
+-- 锁人循环
+spawn(function() while true do lockUpdate(); task.wait() end end)
+
+-- 悬浮球拖动限制
+local dotDragging, dotStart, dotStartPos
+local screenSize = workspace.CurrentCamera.ViewportSize
+ToggleBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dotDragging = true; dotStart = input.Position; dotStartPos = ToggleBtn.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dotDragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dotDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dotStart
+        local newX = math.clamp(dotStartPos.X.Offset + delta.X, 0, screenSize.X - ToggleBtn.AbsoluteSize.X)
+        local newY = math.clamp(dotStartPos.Y.Offset + delta.Y, 0, screenSize.Y - ToggleBtn.AbsoluteSize.Y)
+        ToggleBtn.Position = UDim2.new(0, newX, 0, newY)
+    end
+end)
+
+notify("紧凑旧版UI已加载", "作者: jgft616")
+print("✅ 终极战场 旧版紧凑平铺已启动")
