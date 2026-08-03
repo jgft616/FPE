@@ -1,0 +1,972 @@
+--[[
+    机器人保护光环（状态信息显示主账号详细）
+    使用方法：在小号上运行，输入大号用户名，点击"设置"，再点击"启用"。
+    作者：396abc / 修改：jgft616
+--]]
+
+local LPL = game.Players.LocalPlayer
+local m = LPL:GetMouse()
+local uis = game:GetService("UserInputService")
+local rs = game:GetService("RunService")
+local vim = game:GetService("VirtualInputManager")
+local ts = game:GetService("TweenService")
+
+-- 动态设置的主账号名称（通过 GUI 输入）
+local MAIN = ""
+
+_G.BotTargets = _G.BotTargets or {}
+_G.TargetTimestamp = _G.TargetTimestamp or {}
+_G.RevengeTargets = _G.RevengeTargets or {}
+
+-- 性能监控
+local perf = {
+    last = {}, count = {}, avg = {},
+    targets = {
+        damageCheck = 0.1, protectionLoop = 0.1, revengeLoop = 0.1,
+        selfDamageCheck = 0.1, targetScan = 0.1, teleportCheck = 0.05,
+        attackSimulation = 0.05, mainAttackCheck = 0.1
+    }
+}
+function perf:track(n)
+    local t = tick()
+    local int = t - (self.last[n] or t)
+    self.count[n] = (self.count[n] or 0) + 1
+    self.last[n] = t
+    if not self.avg[n] then self.avg[n] = int else self.avg[n] = self.avg[n] * 0.9 + int * 0.1 end
+    return int
+end
+function perf:shouldRun(n, target)
+    if target then self.targets[n] = target end
+    local tar = self.targets[n] or target or 0.1
+    return (tick() - (self.last[n] or 0)) >= tar
+end
+function perf:getWait(n, base)
+    local a = self.avg[n]
+    if a then
+        if a > base * 1.2 then return math.max(0.01, base * 0.8)
+        elseif a < base * 0.8 then return math.min(0.2, base * 1.2) end
+    end
+    return base
+end
+
+-- 配置
+local cfg = {
+    Radius = 30, BaseDistance = 2, MaxDistance = 8, AttackKey = "1", AttackRate = 0.05,
+    PredictionSmoothing = 0.5, StopThreshold = 1.5, SmoothTeleports = true,
+    TeleportSpeed = 100, DamageCheckInterval = 0.3, SelfDamageCooldown = 5,
+    TeleportCooldown = 0.3, GroundCheckDistance = 10, FallRescueThreshold = 5,
+    ChaseThreshold = 4
+}
+cfg.DamageCheckInterval = 0.1
+cfg.TeleportCooldown = 0.1
+cfg.AttackRate = 0.05
+
+-- 动画ID表
+local BLOCKED = {
+    ["rbxassetid://117246350351228"] = true, ["rbxassetid://74187919899641"] = true,
+    ["rbxassetid://107882686882573"] = true, ["rbxassetid://125866425391978"] = true,
+    ["rbxassetid://126918061336969"] = true, ["rbxassetid://121487089023904"] = true,
+    ["rbxassetid://109196140310311"] = true, ["rbxassetid://85523237728220"] = true,
+    ["rbxassetid://114727174592299"] = true, ["rbxassetid://73468719960096"] = true,
+    ["rbxassetid://87646618665824"] = true, ["rbxassetid://130799255756415"] = true,
+    ["rbxassetid://103768556972581"] = true, ["rbxassetid://82382942589981"] = true,
+    ["rbxassetid://127198994240515"] = true, ["rbxassetid://136740166646414"] = true,
+    ["rbxassetid://128495712899513"] = true, ["rbxassetid://95540949657031"] = true,
+    ["rbxassetid://107227273652755"] = true, ["rbxassetid://80476110104541"] = true,
+    ["rbxassetid://123847767039585"] = true, ["rbxassetid://116845202149345"] = true,
+    ["rbxassetid://111998861062613"] = true, ["rbxassetid://111619214154727"] = true,
+    ["rbxassetid://126894789172280"] = true
+}
+local ALLOWED = {
+    ["rbxassetid://74757937445630"] = true, ["rbxassetid://74184597686817"] = true,
+    ["rbxassetid://129135423510977"] = true
+}
+
+-- 变量
+local active = false
+local target = nil
+local tData = nil
+local followLoop = nil
+local attackLoop = nil
+local dmgThread = nil
+local selfDmgTimer = 0
+local selfDmgActive = false
+local targetBillboard = nil
+local lastTeleport = 0
+local healthHist = {}
+local mainP = nil
+local lastProtectionTeleport = 0
+local isBot = true  -- 任何账号都可以作为机器人
+local protectionLoop = nil
+local queued = nil
+local mainDmgResponse = false
+local lastMainDmg = 0
+local mainAttacking = false
+local lastMainHealth = {}
+local selfDmgStart = 0
+local selfDmgDur = 0
+local revengeTarget = _G.RevengeTargets[LPL.Name]
+local mainWasAlive = false
+local mainDeadProcessed = false
+
+-- 简单的动画缓存
+local myBlockedCache = false
+local myAnimCheck = 0
+
+-- 辅助函数
+local function gRoot(c) return c and (c:FindFirstChild("HumanoidRootPart") or c:FindFirstChild("Torso") or c:FindFirstChild("UpperTorso")) end
+local function gHum(c) return c and (c:FindFirstChild("Humanoid") or c:FindFirstChildWhichIsA("Humanoid")) end
+local function gAnim(c) local h = gHum(c) return h and h:FindFirstChildOfClass("Animator") end
+local function gVel(c) local r = gRoot(c) return r and r.Velocity or Vector3.new() end
+
+local blockedLook = {}
+for id, _ in pairs(BLOCKED) do blockedLook[id] = true end
+local allowedLook = {}
+for id, _ in pairs(ALLOWED) do allowedLook[id] = true end
+
+local function normId(id)
+    if not id then return nil end
+    local n = id:match("(%d+)$")
+    return n and ("rbxassetid://" .. n) or id
+end
+
+local function getAnimIds(p)
+    if not p or not p.Character then return {} end
+    local a = gAnim(p.Character)
+    if not a then return {} end
+    local ids = {}
+    for _, t in ipairs(a:GetPlayingAnimationTracks()) do
+        if t.Animation and t.Animation.AnimationId then
+            local n = normId(t.Animation.AnimationId)
+            if n then table.insert(ids, n) end
+        end
+    end
+    return ids
+end
+
+local function hasBlocked(p)
+    if not p or not p.Character then return false end
+    if p == LPL then
+        local now = tick()
+        if now - myAnimCheck < 0.1 then return myBlockedCache end
+        myAnimCheck = now
+    end
+    local a = gAnim(p.Character)
+    if not a then
+        if p == LPL then myBlockedCache = false end
+        return false
+    end
+    for _, id in ipairs(getAnimIds(p)) do
+        if blockedLook[id] and not allowedLook[id] then
+            if p == LPL then myBlockedCache = true end
+            return true
+        end
+    end
+    if p == LPL then myBlockedCache = false end
+    return false
+end
+
+local function takingDmg(p)
+    if not p or not p.Character then return false, 0 end
+    local h = gHum(p.Character)
+    if not h then return false, 0 end
+    local cur = h.Health
+    local last = healthHist[p]
+    if last and cur < last then
+        healthHist[p] = cur
+        return true, last - cur
+    end
+    healthHist[p] = cur
+    return false, 0
+end
+
+local function isAttacked(p)
+    if not p then return false end
+    if hasBlocked(LPL) then return false end
+    return takingDmg(p) or hasBlocked(p)
+end
+
+local function alive(p) if not p or not p.Character then return false end local h = gHum(p.Character) return h and h.Health > 0 and h.Parent ~= nil end
+local function dist(p) local r1 = gRoot(LPL.Character) local r2 = gRoot(p.Character) return r1 and r2 and (r1.Position - r2.Position).Magnitude or 9999 end
+local function distPos(p1, p2) return (p1 - p2).Magnitude end
+
+local function falling()
+    local r = gRoot(LPL.Character)
+    if not r then return false, nil end
+    local p = r.Position
+    local ray = Ray.new(p + Vector3.new(0, 2, 0), Vector3.new(0, -cfg.GroundCheckDistance, 0))
+    local hit = workspace:FindPartOnRayWithIgnoreList(ray, {LPL.Character})
+    if not hit then
+        local upRay = Ray.new(p, Vector3.new(0, cfg.GroundCheckDistance, 0))
+        local upHit, upPos = workspace:FindPartOnRayWithIgnoreList(upRay, {LPL.Character})
+        if upHit then
+            local d = p.Y - upPos.Y
+            if d > cfg.FallRescueThreshold then return true, upPos.Y + 3 end
+        end
+        return true, p.Y + 10
+    end
+    return false, nil
+end
+
+local function isMain(p) return p and MAIN ~= "" and p.Name == MAIN end
+local function getMain() if MAIN == "" then return nil end if not mainP then mainP = game.Players:FindFirstChild(MAIN) end return mainP end
+local function botAttacking() return hasBlocked(LPL) end
+
+local function behindPos(c, d)
+    if not c then return nil end
+    local r = gRoot(c)
+    if not r then return nil end
+    local p = r.Position
+    local v = gVel(c)
+    local look = r.CFrame.LookVector
+    local right = r.CFrame.RightVector
+    local spd = v.Magnitude
+    local side = -2.5
+    if spd > 5 then
+        local lead = math.min(spd * 0.4, 12)
+        local pred = p + v.Unit * lead
+        local perp = Vector3.new(-v.Unit.Z, 0, v.Unit.X).Unit
+        if perp.Magnitude < 0.1 then perp = right end
+        return pred + (perp * side)
+    elseif spd > 1 then
+        local lead = math.min(spd * 0.3, 8)
+        local pred = p + v.Unit * lead
+        local perp = Vector3.new(-v.Unit.Z, 0, v.Unit.X).Unit
+        if perp.Magnitude < 0.1 then perp = right end
+        return pred + (perp * side)
+    else
+        return p - (look * d) + (right * side)
+    end
+end
+
+local function targetFree(p)
+    if not p then return true end
+    local owner = _G.BotTargets[p.Name]
+    local ts = _G.TargetTimestamp[p.Name] or 0
+    if not owner then return true end
+    if owner == LPL.Name then _G.TargetTimestamp[p.Name] = tick(); return true end
+    local ownerP = game.Players:FindFirstChild(owner)
+    if not ownerP or not alive(ownerP) then _G.BotTargets[p.Name] = nil; return true end
+    if tick() - ts > 2 then _G.BotTargets[p.Name] = nil; return true end
+    return false
+end
+
+local function claim(p)
+    if not p then return false end
+    if not targetFree(p) then return false end
+    _G.BotTargets[p.Name] = LPL.Name
+    _G.TargetTimestamp[p.Name] = tick()
+    return true
+end
+local function release(p)
+    if not p then return end
+    if _G.BotTargets[p.Name] == LPL.Name then _G.BotTargets[p.Name] = nil end
+end
+
+local function setRevenge(p)
+    if not p then revengeTarget = nil; _G.RevengeTargets[LPL.Name] = nil; return end
+    revengeTarget = p.Name
+    _G.RevengeTargets[LPL.Name] = p.Name
+end
+local function getRevenge()
+    if not revengeTarget then return nil end
+    local p = game.Players:FindFirstChild(revengeTarget)
+    if p and alive(p) and not isMain(p) then return p end
+    if p then setRevenge(nil) end
+    return nil
+end
+
+local function distToMain() local m = getMain() if not m or not m.Character then return 9999 end return dist(m) end
+
+local function mainTakingDmg()
+    local m = getMain()
+    if not m or not m.Character then return false, 0 end
+    local h = gHum(m.Character)
+    if not h then return false, 0 end
+    local cur = h.Health
+    local last = lastMainHealth[m]
+    if last and cur < last then
+        local dmg = last - cur
+        lastMainHealth[m] = cur
+        lastMainDmg = tick()
+        return true, dmg
+    end
+    lastMainHealth[m] = cur
+    return false, 0
+end
+
+local function resetMainAttack()
+    mainAttacking = false
+end
+
+local function checkMainAttack()
+    local m = getMain()
+    if not m or not m.Character then return false end
+    if not botAttacking() then return false end
+    local dmg, dmgAmt = mainTakingDmg()
+    if not dmg or dmgAmt < 5 then return false end
+    local mRoot = gRoot(m.Character)
+    local myRoot = gRoot(LPL.Character)
+    if not mRoot or not myRoot then return false end
+    local myDist = distPos(myRoot.Position, mRoot.Position)
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p ~= m and alive(p) and hasBlocked(p) then
+            local pRoot = gRoot(p.Character)
+            if pRoot and distPos(pRoot.Position, mRoot.Position) < myDist then return false end
+        end
+    end
+    return true
+end
+
+local function findMainKiller(pos)
+    if not pos then return nil end
+    local closest, closestDist = nil, 9999
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p ~= LPL and not isMain(p) and alive(p) then
+            if hasBlocked(p) then
+                local r = gRoot(p.Character)
+                if r then
+                    local d = distPos(r.Position, pos)
+                    if d < closestDist then closestDist = d; closest = p end
+                end
+            end
+        end
+    end
+    if not closest then
+        closestDist = 9999
+        for _, p in ipairs(game.Players:GetPlayers()) do
+            if p ~= LPL and not isMain(p) and alive(p) then
+                local r = gRoot(p.Character)
+                if r then
+                    local d = distPos(r.Position, pos)
+                    if d < closestDist then closestDist = d; closest = p end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function checkLongDmg() return selfDmgActive and (tick() - selfDmgStart) >= 2 end
+
+local function findClosestEnemyToMain()
+    local m = getMain()
+    if not m or not m.Character then return nil end
+    local mRoot = gRoot(m.Character)
+    if not mRoot then return nil end
+    local candidates = {}
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p ~= LPL and not isMain(p) and alive(p) then
+            local r = gRoot(p.Character)
+            if r then
+                local d = distPos(r.Position, mRoot.Position)
+                if d <= 40 then table.insert(candidates, {p = p, d = d, inCombat = isAttacked(p)}) end
+            end
+        end
+    end
+    table.sort(candidates, function(a, b) return a.d < b.d end)
+    for _, c in ipairs(candidates) do if not c.inCombat then return c.p end end
+    return #candidates > 0 and candidates[1].p or nil
+end
+
+local function resetChar(reason)
+    if followLoop then followLoop:Disconnect() followLoop = nil end
+    if attackLoop then attackLoop:Disconnect() attackLoop = nil end
+    dmgThread = nil
+    if target then release(target) end
+    if targetBillboard then targetBillboard:Destroy(); targetBillboard = nil end
+    if target then healthHist[target] = nil end
+    target = nil
+    tData = nil
+    selfDmgActive = false
+    selfDmgTimer = 0
+    selfDmgStart = 0
+    selfDmgDur = 0
+    resetMainAttack()
+    if LPL.Character then
+        local h = gHum(LPL.Character)
+        if h then h.Health = 0 else pcall(function() LPL.Character:BreakJoints() end) end
+    end
+end
+
+local function teleNearMain()
+    local m = getMain()
+    if not m or not m.Character then return false end
+    local mRoot = gRoot(m.Character)
+    if not mRoot then return false end
+    local a = math.random() * 2 * math.pi
+    local r = math.random(15, 25)
+    local pos = mRoot.Position + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
+    local ray = Ray.new(pos + Vector3.new(0, 10, 0), Vector3.new(0, -20, 0))
+    local hit, hitPos = workspace:FindPartOnRayWithIgnoreList(ray, {LPL.Character, m.Character})
+    local groundY = hit and hitPos.Y or pos.Y
+    local safe = Vector3.new(pos.X, groundY + 3, pos.Z)
+    local myRoot = gRoot(LPL.Character)
+    if myRoot then myRoot.CFrame = CFrame.new(safe) lastProtectionTeleport = tick() return true end
+    return false
+end
+
+local function createBillboard(p)
+    if targetBillboard then targetBillboard:Destroy() end
+    if not p or not p.Character then return end
+    local r = gRoot(p.Character)
+    if not r then return end
+    local b = Instance.new("BillboardGui")
+    b.Name = "AttackingIndicator"
+    b.Adornee = r
+    b.Size = UDim2.new(0, 150, 0, 40)
+    b.StudsOffset = Vector3.new(0, 4, 0)
+    b.AlwaysOnTop = true
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1, 0, 0, 40)
+    txt.BackgroundTransparency = 1
+    txt.Text = revengeTarget == p.Name and "复仇" or "攻击中"
+    txt.TextColor3 = revengeTarget == p.Name and Color3.fromRGB(255, 0, 255) or Color3.fromRGB(255, 50, 50)
+    txt.Font = Enum.Font.GothamBold
+    txt.TextSize = 18
+    txt.Parent = b
+    b.Parent = game.CoreGui
+    targetBillboard = b
+end
+
+local function removeBillboard() if targetBillboard then targetBillboard:Destroy() end end
+
+local function stop(reason)
+    if target then release(target) end
+    if followLoop then followLoop:Disconnect(); followLoop = nil end
+    if attackLoop then attackLoop:Disconnect(); attackLoop = nil end
+    dmgThread = nil
+    if target then removeBillboard(); healthHist[target] = nil end
+    target = nil
+    tData = nil
+    if targetTxt then targetTxt.Text = "目标: 无" end
+    if infoTxt then infoTxt.Text = "状态信息" end
+end
+
+local function startDmgCheck()
+    if dmgThread then dmgThread = nil end
+    if not target or not tData then return end
+    local lastHealth = nil
+    local stopTimer = 0
+    local lastDmgTime = 0
+    dmgThread = coroutine.create(function()
+        while active and target and alive(target) do
+            perf:track("damageCheck")
+            local h = gHum(target.Character)
+            if h then
+                local cur = h.Health
+                local v = gVel(target.Character)
+                local moving = v.Magnitude > 1
+                tData.smoothedVelocity = tData.smoothedVelocity:Lerp(v, cfg.PredictionSmoothing)
+                if tData.smoothedVelocity.Magnitude > 1 then
+                    tData.movingTime = (tData.movingTime or 0) + 0.1
+                    local prog = math.min(tData.movingTime / cfg.ChaseThreshold, 1)
+                    tData.currentDistance = cfg.BaseDistance + (cfg.MaxDistance - cfg.BaseDistance) * prog
+                    tData.isMoving = true
+                else
+                    tData.movingTime = 0
+                    tData.currentDistance = cfg.BaseDistance
+                    tData.isMoving = false
+                end
+                if lastHealth and cur < lastHealth then
+                    tData.takingDamage = true
+                    lastDmgTime = tick()
+                    stopTimer = 0
+                else
+                    if tData.takingDamage and tick() - lastDmgTime > 2 then
+                        tData.takingDamage = false
+                    end
+                    if moving then stopTimer = 0
+                    else
+                        stopTimer = stopTimer + cfg.DamageCheckInterval
+                        if stopTimer >= cfg.StopThreshold then tData.isMoving = false end
+                    end
+                end
+                lastHealth = cur
+                healthHist[target] = cur
+            end
+            task.wait(perf:getWait("damageCheck", cfg.DamageCheckInterval))
+        end
+    end)
+    coroutine.resume(dmgThread)
+end
+
+local function attack(p)
+    if not p or not alive(p) then return false end
+    if isMain(p) then resetChar("攻击主账号"); return false end
+    local isRev = (revengeTarget == p.Name)
+    if not isRev and isAttacked(p) then return false end
+    if not claim(p) then return false end
+    stop("切换中")
+    target = p
+    tData = {
+        smoothedVelocity = Vector3.new(), movingTime = 0,
+        currentDistance = cfg.BaseDistance, isMoving = false,
+        takingDamage = false
+    }
+    if targetTxt then targetTxt.Text = "目标: " .. p.Name .. (isRev and " (复仇)" or "") end
+    createBillboard(p)
+    startDmgCheck()
+    followLoop = rs.Stepped:Connect(function()
+        if checkLongDmg() then resetChar("长时间受击"); return end
+        if checkMainAttack() then resetChar("主账号攻击"); return end
+        if selfDmgActive then return end
+        if not active then stop("已禁用"); return end
+        if not target or not alive(target) then
+            local rev = getRevenge()
+            if rev then attack(rev)
+            elseif queued and alive(queued) then local n = queued; queued = nil; attack(n)
+            else stop("目标死亡") end
+            return
+        end
+        if not hasBlocked(LPL) and takingDmg(target) then
+            release(target); removeBillboard(); healthHist[target] = nil
+            target = nil; tData = nil; return
+        end
+        local f = falling()
+        if f and target then
+            local myRoot = gRoot(LPL.Character)
+            local tChar = target.Character
+            if myRoot and tChar then
+                local tRoot = gRoot(tChar)
+                if tRoot then
+                    local tPos = tRoot.Position
+                    local ray = Ray.new(tPos + Vector3.new(0, 5, 0), Vector3.new(0, -10, 0))
+                    local hit, hitPos = workspace:FindPartOnRayWithIgnoreList(ray, {LPL.Character, tChar})
+                    local groundY = hit and hitPos.Y or tPos.Y
+                    myRoot.CFrame = CFrame.new(Vector3.new(tPos.X, groundY + 3, tPos.Z))
+                    lastTeleport = tick()
+                end
+            end
+            return
+        end
+        local now = tick()
+        local should = false
+        if tData then
+            if tData.isMoving and not tData.takingDamage then should = true
+            elseif not tData.isMoving and not tData.takingDamage and (now - lastTeleport) >= 2 then should = true end
+        end
+        if should and now - lastTeleport >= cfg.TeleportCooldown then
+            pcall(function()
+                local myRoot = gRoot(LPL.Character)
+                local tChar = target.Character
+                if myRoot and tChar then
+                    local b = behindPos(tChar, tData.currentDistance)
+                    if b then
+                        local ray = Ray.new(b + Vector3.new(0, 5, 0), Vector3.new(0, -10, 0))
+                        local hit, hitPos = workspace:FindPartOnRayWithIgnoreList(ray, {LPL.Character, tChar})
+                        local groundY = hit and hitPos.Y or b.Y
+                        local final = Vector3.new(b.X, groundY + 3, b.Z)
+                        if cfg.SmoothTeleports then
+                            local tween = ts:Create(myRoot, TweenInfo.new(distPos(myRoot.Position, final) / cfg.TeleportSpeed), {CFrame = CFrame.new(final)})
+                            tween:Play()
+                        else
+                            myRoot.CFrame = CFrame.new(final)
+                        end
+                        lastTeleport = now
+                    end
+                end
+            end)
+        end
+    end)
+    attackLoop = rs.Heartbeat:Connect(function()
+        if selfDmgActive or not active or not target or not alive(target) then return end
+        pcall(function()
+            vim:SendKeyEvent(true, Enum.KeyCode.One, false, nil)
+            vim:SendMouseButtonEvent(0, 0, 0, true, nil, 1)
+            task.wait(0.01)
+            vim:SendKeyEvent(false, Enum.KeyCode.One, false, nil)
+            vim:SendMouseButtonEvent(0, 0, 0, false, nil, 1)
+        end)
+        task.wait(perf:getWait("attackSimulation", cfg.AttackRate))
+    end)
+    return true
+end
+
+local function findBest()
+    local best, bestScore = nil, -1
+    for _, p in ipairs(game.Players:GetPlayers()) do
+        if p ~= LPL and not isMain(p) and alive(p) then
+            if targetFree(p) and not isAttacked(p) then
+                local d = dist(p)
+                if d <= cfg.Radius then
+                    local h = gHum(p.Character)
+                    local hp = h and h.Health or 100
+                    local s = (1000 / d) + (100 - hp)
+                    if s > bestScore then bestScore = s; best = p end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function startNormal()
+    spawn(function()
+        while active do
+            perf:track("targetScan")
+            if not target and not selfDmgActive then
+                local p = findBest()
+                if p then attack(p) end
+            end
+            task.wait(perf:getWait("targetScan", 0.1))
+        end
+    end)
+end
+
+local function startRevLoop()
+    spawn(function()
+        while active do
+            perf:track("revengeLoop")
+            local rev = getRevenge()
+            if rev then
+                if not target or target ~= rev then
+                    if target then stop("复仇切换") end
+                    attack(rev)
+                end
+            end
+            task.wait(perf:getWait("revengeLoop", 0.1))
+        end
+    end)
+end
+
+local function startMainCheckLoop()
+    spawn(function()
+        while active do
+            if checkMainAttack() then resetChar("主账号攻击") end
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function startProtection()
+    startRevLoop()
+    startMainCheckLoop()
+    task.wait(1)
+    teleNearMain()
+    spawn(function()
+        while active do
+            perf:track("protectionLoop")
+            local m = getMain()
+            if m and m.Character then
+                local deathPos = nil
+                local mRoot = gRoot(m.Character)
+                if mRoot then deathPos = mRoot.Position end
+                local mAlive = alive(m)
+                if mainWasAlive and not mAlive and not mainDeadProcessed then
+                    mainDeadProcessed = true
+                    local killer = findMainKiller(deathPos)
+                    if killer then
+                        setRevenge(killer)
+                        if target then stop("复仇切换") end
+                        attack(killer)
+                    end
+                end
+                mainWasAlive = mAlive
+                if mAlive then mainDeadProcessed = false end
+                local rev = getRevenge()
+                if rev then
+                    task.wait(perf:getWait("protectionLoop", 0.1))
+                    continue
+                end
+                local d = distToMain()
+                if d > 30 and not target and tick() - lastProtectionTeleport > 3 then
+                    teleNearMain()
+                end
+                local dmg, _ = mainTakingDmg()
+                if dmg and not mainDmgResponse then
+                    mainDmgResponse = true
+                    local e = findClosestEnemyToMain()
+                    if e then
+                        if target then queued = e else attack(e) end
+                    end
+                    task.wait(5)
+                    mainDmgResponse = false
+                end
+                if not target and not queued and mRoot then
+                    for _, p in ipairs(game.Players:GetPlayers()) do
+                        if p ~= LPL and not isMain(p) and alive(p) and targetFree(p) and not isAttacked(p) then
+                            local r = gRoot(p.Character)
+                            if r and distPos(r.Position, mRoot.Position) <= 30 then
+                                attack(p); break
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(perf:getWait("protectionLoop", 0.1))
+        end
+    end)
+end
+
+local function startSelfCheck()
+    spawn(function()
+        local last = nil
+        while active do
+            perf:track("selfDamageCheck")
+            local h = gHum(LPL.Character)
+            if h then
+                local cur = h.Health
+                if last and cur < last then
+                    if not selfDmgActive then selfDmgStart = tick() end
+                    selfDmgActive = true
+                    selfDmgTimer = 0
+                    removeBillboard()
+                else
+                    if selfDmgActive then selfDmgDur = tick() - selfDmgStart end
+                end
+                last = cur
+            end
+            if selfDmgActive then
+                selfDmgTimer = selfDmgTimer + 0.5
+                if selfDmgTimer >= cfg.SelfDamageCooldown then
+                    selfDmgActive = false
+                    selfDmgDur = 0
+                    if target and alive(target) then createBillboard(target) end
+                end
+            end
+            task.wait(perf:getWait("selfDamageCheck", 0.1))
+        end
+    end)
+end
+
+-- 更新主账号状态信息
+local function updateMainInfo()
+    if not infoTxt then return end
+    if MAIN == "" then
+        infoTxt.Text = "状态信息\n主账号未设置"
+        return
+    end
+    local m = getMain()
+    if not m then
+        infoTxt.Text = "主账号: " .. MAIN .. "\n状态: 离线或不存在"
+        return
+    end
+    if not m.Character then
+        infoTxt.Text = "主账号: " .. MAIN .. "\n状态: 在线但未生成角色"
+        return
+    end
+    local hum = gHum(m.Character)
+    if not hum then
+        infoTxt.Text = "主账号: " .. MAIN .. "\n状态: 角色无 Humanoid"
+        return
+    end
+
+    local hp = hum.Health
+    local maxHp = hum.MaxHealth
+    local d = distToMain()
+    local isAlive = alive(m)
+    local dmg, dmgAmt = takingDmg(m)
+    local revenge = revengeTarget and "是 (" .. revengeTarget .. ")" or "否"
+    local mode = isBot and "保护模式" or "普通模式"
+    local myDmg = selfDmgActive and "受击中" or "正常"
+
+    infoTxt.Text = string.format(
+        "主账号: %s\n血量: %.0f/%.0f\n距离: %.1f\n在线: %s\n受击: %s (%.1f)\n复仇目标: %s\n模式: %s\n自身: %s",
+        MAIN, hp, maxHp, d,
+        isAlive and "是" or "否",
+        dmg and "是" or "否", dmgAmt,
+        revenge, mode, myDmg
+    )
+end
+
+-- ==================== GUI（手动输入 + 折叠） ====================
+local gui, frame, content, statusTxt, targetTxt, toggleBtn, infoTxt, mainInput, setMainBtn, mainLabel, titleBar
+
+local function setupGUI()
+    gui = Instance.new("ScreenGui")
+    gui.Name = "KillAuraGUI"
+    gui.ResetOnSpawn = false
+    gui.Parent = game.CoreGui
+
+    frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 280, 0, 460)  -- 高度增加以容纳更多信息
+    frame.Position = UDim2.new(0, 20, 0.5, -230)
+    frame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Draggable = true
+    frame.Parent = gui
+
+    -- 标题栏（可点击折叠）
+    titleBar = Instance.new("TextButton")
+    titleBar.Size = UDim2.new(1, 0, 0, 35)
+    titleBar.Position = UDim2.new(0, 0, 0, 0)
+    titleBar.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+    titleBar.Text = "机器人光环 ▼"
+    titleBar.TextColor3 = Color3.fromRGB(220, 220, 255)
+    titleBar.Font = Enum.Font.GothamBold
+    titleBar.TextSize = 14
+    titleBar.Parent = frame
+
+    -- 内容区域
+    content = Instance.new("Frame")
+    content.Size = UDim2.new(1, 0, 1, -35)
+    content.Position = UDim2.new(0, 0, 0, 35)
+    content.BackgroundTransparency = 1
+    content.Visible = true
+    content.Parent = frame
+
+    -- 折叠逻辑
+    titleBar.MouseButton1Click:Connect(function()
+        content.Visible = not content.Visible
+        titleBar.Text = content.Visible and "机器人光环 ▼" or "机器人光环 ▶"
+        frame.Size = content.Visible and UDim2.new(0, 280, 0, 460) or UDim2.new(0, 280, 0, 35)
+    end)
+
+    statusTxt = Instance.new("TextLabel")
+    statusTxt.Size = UDim2.new(1, -20, 0, 25)
+    statusTxt.Position = UDim2.new(0, 10, 0, 5)
+    statusTxt.BackgroundTransparency = 1
+    statusTxt.Text = "状态: 禁用"
+    statusTxt.TextColor3 = Color3.fromRGB(220, 220, 220)
+    statusTxt.Font = Enum.Font.Gotham
+    statusTxt.TextSize = 12
+    statusTxt.TextXAlignment = Enum.TextXAlignment.Left
+    statusTxt.Parent = content
+
+    mainLabel = Instance.new("TextLabel")
+    mainLabel.Size = UDim2.new(1, -20, 0, 18)
+    mainLabel.Position = UDim2.new(0, 10, 0, 33)
+    mainLabel.BackgroundTransparency = 1
+    mainLabel.Text = "主账号: 未设置"
+    mainLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+    mainLabel.Font = Enum.Font.GothamBold
+    mainLabel.TextSize = 11
+    mainLabel.TextXAlignment = Enum.TextXAlignment.Left
+    mainLabel.Parent = content
+
+    mainInput = Instance.new("TextBox")
+    mainInput.Size = UDim2.new(0.65, 0, 0, 26)
+    mainInput.Position = UDim2.new(0, 10, 0, 55)
+    mainInput.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    mainInput.PlaceholderText = "输入主账号用户名"
+    mainInput.Text = ""
+    mainInput.Font = Enum.Font.Gotham
+    mainInput.TextSize = 11
+    mainInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+    mainInput.Parent = content
+
+    setMainBtn = Instance.new("TextButton")
+    setMainBtn.Size = UDim2.new(0.28, 0, 0, 26)
+    setMainBtn.Position = UDim2.new(0.68, 0, 0, 55)
+    setMainBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 70)
+    setMainBtn.Text = "设置"
+    setMainBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    setMainBtn.Font = Enum.Font.GothamBold
+    setMainBtn.TextSize = 11
+    setMainBtn.Parent = content
+
+    setMainBtn.MouseButton1Click:Connect(function()
+        local inputName = mainInput.Text
+        if inputName and inputName ~= "" then
+            MAIN = inputName
+            mainP = game.Players:FindFirstChild(MAIN)
+            mainLabel.Text = "主账号: " .. MAIN
+            statusTxt.Text = "主账号已设置，请点击启用"
+        end
+    end)
+
+    targetTxt = Instance.new("TextLabel")
+    targetTxt.Size = UDim2.new(1, -20, 0, 18)
+    targetTxt.Position = UDim2.new(0, 10, 0, 88)
+    targetTxt.BackgroundTransparency = 1
+    targetTxt.Text = "目标: 无"
+    targetTxt.TextColor3 = Color3.fromRGB(255, 200, 100)
+    targetTxt.Font = Enum.Font.GothamBold
+    targetTxt.TextSize = 11
+    targetTxt.TextXAlignment = Enum.TextXAlignment.Left
+    targetTxt.Parent = content
+
+    toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(1, -20, 0, 32)
+    toggleBtn.Position = UDim2.new(0, 10, 0, 112)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+    toggleBtn.Text = "启用"
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 13
+    toggleBtn.Parent = content
+
+    infoTxt = Instance.new("TextLabel")
+    infoTxt.Size = UDim2.new(1, -20, 0, 240)
+    infoTxt.Position = UDim2.new(0, 10, 0, 150)
+    infoTxt.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    infoTxt.Text = "状态信息"
+    infoTxt.TextColor3 = Color3.fromRGB(160, 160, 180)
+    infoTxt.Font = Enum.Font.Gotham
+    infoTxt.TextSize = 10
+    infoTxt.TextWrapped = true
+    infoTxt.Parent = content
+end
+
+local function setupEvents()
+    toggleBtn.MouseButton1Click:Connect(function()
+        if MAIN == "" then
+            statusTxt.Text = "请先设置主账号！"
+            return
+        end
+        if LPL.Name == MAIN then
+            statusTxt.Text = "这是主账号，不能运行！"
+            return
+        end
+        active = not active
+        if active then
+            toggleBtn.Text = "禁用"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+            statusTxt.Text = "状态: 启用"
+            startProtection()
+            startSelfCheck()
+        else
+            toggleBtn.Text = "启用"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+            statusTxt.Text = "状态: 禁用"
+            stop("已禁用")
+            queued = nil
+            resetMainAttack()
+        end
+    end)
+    uis.InputBegan:Connect(function(i, gp)
+        if gp then return end
+        if i.KeyCode == Enum.KeyCode.R then
+            active = false
+            if toggleBtn then
+                toggleBtn.Text = "启用"
+                toggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+            end
+            if statusTxt then statusTxt.Text = "状态: 禁用" end
+            stop("手动停止")
+            queued = nil
+            resetMainAttack()
+        end
+    end)
+    LPL.CharacterAdded:Connect(function()
+        stop("死亡")
+        selfDmgActive = false
+        selfDmgTimer = 0
+        selfDmgStart = 0
+        selfDmgDur = 0
+        healthHist = {}
+        queued = nil
+        mainDmgResponse = false
+        resetMainAttack()
+        local rev = getRevenge()
+        if rev and active then
+            task.wait(1.5)
+            attack(rev)
+        end
+    end)
+end
+
+setupGUI()
+setupEvents()
+
+-- 启动主账号信息更新循环（每0.5秒刷新）
+spawn(function()
+    while true do
+        updateMainInfo()
+        task.wait(0.5)
+    end
+end)
+
+print("已加载 - 手动输入 + 折叠 + 主账号详细信息 | 请先设置主账号")
