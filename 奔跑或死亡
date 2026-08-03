@@ -1,0 +1,361 @@
+--[[
+    全服秒杀脚本 - FengUI版
+    作者：jgft616
+    界面基于FengUI风格设计，所有功能默认关闭，手动开启
+--]]
+
+-- ==================== FengUI 库核心 ====================
+local FengUI = {}
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+
+local ColorPalette = {
+    BackgroundDark = Color3.fromRGB(18, 18, 30),
+    BackgroundMedium = Color3.fromRGB(25, 25, 40),
+    BackgroundLight = Color3.fromRGB(30, 30, 50),
+    AccentRed = Color3.fromRGB(255, 60, 60),
+    AccentGreen = Color3.fromRGB(0, 200, 80),
+    TextLight = Color3.fromRGB(240, 245, 255),
+    TextGray = Color3.fromRGB(180, 190, 210)
+}
+
+function FengUI.DigitalParticleExplosion(target)
+    if not target then return end
+    local mouse = Players.LocalPlayer:GetMouse()
+    local absolutePosition = target.AbsolutePosition
+    local absoluteSize = target.AbsoluteSize
+    local relX = (mouse.X - absolutePosition.X) / absoluteSize.X
+    local relY = (mouse.Y - absolutePosition.Y) / absoluteSize.Y
+    
+    local explosionCenter = Instance.new("Frame")
+    explosionCenter.Name = "ExplosionCenter"
+    explosionCenter.Parent = target
+    explosionCenter.BackgroundColor3 = ColorPalette.AccentRed
+    explosionCenter.BackgroundTransparency = 0.3
+    explosionCenter.ZIndex = 8
+    explosionCenter.Size = UDim2.new(0, 20, 0, 20)
+    explosionCenter.AnchorPoint = Vector2.new(0.5, 0.5)
+    explosionCenter.Position = UDim2.new(relX, 0, relY, 0)
+    Instance.new("UICorner", explosionCenter).CornerRadius = UDim.new(1, 0)
+    
+    local centerStroke = Instance.new("UIStroke")
+    centerStroke.Parent = explosionCenter
+    centerStroke.Color = ColorPalette.AccentRed
+    centerStroke.Thickness = 3
+    centerStroke.Transparency = 0.2
+    
+    local particles = {}
+    for i = 1, 12 do
+        local particle = Instance.new("TextLabel")
+        particle.Name = "DigitalParticle_" .. i
+        particle.Parent = target
+        particle.BackgroundTransparency = 1
+        particle.Text = tostring(math.random(0, 1))
+        particle.TextColor3 = Color3.fromRGB(math.random(200, 255), math.random(50, 100), math.random(50, 100))
+        particle.TextSize = math.random(10, 14)
+        particle.Font = Enum.Font.Code
+        particle.ZIndex = 9
+        particle.Size = UDim2.new(0, 20, 0, 20)
+        particle.Position = UDim2.new(relX, 0, relY, 0)
+        particle.AnchorPoint = Vector2.new(0.5, 0.5)
+        table.insert(particles, particle)
+    end
+    
+    task.spawn(function()
+        local startTime = tick()
+        TweenService:Create(explosionCenter, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 40, 0, 40)
+        }):Play()
+        TweenService:Create(centerStroke, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Thickness = 8,
+            Transparency = 1
+        }):Play()
+        
+        local connection
+        connection = RunService.Heartbeat:Connect(function()
+            local elapsed = tick() - startTime
+            if elapsed > 0.8 then
+                connection:Disconnect()
+                for _, particle in pairs(particles) do particle:Destroy() end
+                explosionCenter:Destroy()
+                return
+            end
+            local progress = elapsed / 0.8
+            local angles = {0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330}
+            for i, particle in pairs(particles) do
+                local angle = math.rad(angles[i] or (i * 30))
+                local distance = 100 * progress
+                particle.Position = UDim2.new(relX, math.cos(angle) * distance, relY, math.sin(angle) * distance)
+                particle.Rotation = angles[i] * progress
+                particle.TextTransparency = progress
+            end
+            explosionCenter.Size = UDim2.new(0, 40 + 20 * progress, 0, 40 + 20 * progress)
+        end)
+        
+        local shockwave = Instance.new("Frame")
+        shockwave.Parent = target
+        shockwave.BackgroundTransparency = 1
+        shockwave.ZIndex = 7
+        shockwave.Size = UDim2.new(0, 0, 0, 0)
+        shockwave.AnchorPoint = Vector2.new(0.5, 0.5)
+        shockwave.Position = UDim2.new(relX, 0, relY, 0)
+        local sws = Instance.new("UIStroke", shockwave)
+        sws.Color = Color3.fromRGB(255, 80, 80)
+        sws.Thickness = 3
+        sws.Transparency = 0.3
+        TweenService:Create(shockwave, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 120, 0, 120)
+        }):Play()
+        TweenService:Create(sws, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Thickness = 1,
+            Transparency = 1
+        }):Play()
+        task.wait(0.6)
+        shockwave:Destroy()
+    end)
+end
+
+-- ==================== 业务逻辑 ====================
+local RS = game:GetService("ReplicatedStorage")
+local LP = Players.LocalPlayer
+local DeathEvent = RS:WaitForChild("RemoteEvents"):WaitForChild("ModuleScript"):WaitForChild("Death")
+
+local KillAllEnabled = false
+local killLoop = nil
+
+local function notify(title, msg)
+    pcall(function() StarterGui:SetCore("SendNotification", {Title = title, Text = msg, Duration = 3}) end)
+end
+
+local function killAllPlayers()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LP then
+            pcall(function() DeathEvent:FireServer(player.Name) end)
+        end
+    end
+end
+
+local function startLoop()
+    if killLoop then task.cancel(killLoop) end
+    killLoop = task.spawn(function()
+        while KillAllEnabled do
+            killAllPlayers()
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function stopLoop()
+    if killLoop then task.cancel(killLoop); killLoop = nil end
+end
+
+local function toggleKillAll(on)
+    KillAllEnabled = on
+    if on then
+        startLoop()
+        notify("全服秒杀", "已开启")
+    else
+        stopLoop()
+        notify("全服秒杀", "已关闭")
+    end
+end
+
+-- ==================== GUI 构建（FengUI 风格） ====================
+local Gui = Instance.new("ScreenGui")
+Gui.Name = "KillAllFengUI"
+Gui.Parent = LP:WaitForChild("PlayerGui")
+Gui.ResetOnSpawn = false
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 260, 0, 160)
+Main.Position = UDim2.new(0.5, -130, 0.4, -80)
+Main.BackgroundColor3 = ColorPalette.BackgroundDark
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = Gui
+local MainCorner = Instance.new("UICorner", Main)
+MainCorner.CornerRadius = UDim.new(0, 10)
+
+local UIStroke = Instance.new("UIStroke", Main)
+UIStroke.Color = Color3.fromRGB(50, 50, 50)
+UIStroke.Thickness = 1
+UIStroke.Transparency = 0.5
+
+-- 标题栏 (仅此处改为"奔跑或死亡")
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 32)
+TitleBar.BackgroundColor3 = ColorPalette.BackgroundMedium
+TitleBar.BackgroundTransparency = 0.2
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = Main
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
+local TitleBarCornerFix = Instance.new("Frame")
+TitleBarCornerFix.Size = UDim2.new(1, 0, 0, 10)
+TitleBarCornerFix.Position = UDim2.new(0, 0, 1, -10)
+TitleBarCornerFix.BackgroundColor3 = ColorPalette.BackgroundMedium
+TitleBarCornerFix.BorderSizePixel = 0
+TitleBarCornerFix.Parent = TitleBar
+
+local TitleText = Instance.new("TextLabel")
+TitleText.Size = UDim2.new(1, -70, 1, 0)
+TitleText.Position = UDim2.new(0, 12, 0, 0)
+TitleText.BackgroundTransparency = 1
+TitleText.Font = Enum.Font.GothamBold
+TitleText.Text = "奔跑或死亡  作者: jgft616" -- 修改的标题
+TitleText.TextColor3 = ColorPalette.TextLight
+TitleText.TextSize = 12
+TitleText.TextXAlignment = Enum.TextXAlignment.Left
+TitleText.Parent = TitleBar
+
+-- 用户名
+local UsernameLabel = Instance.new("TextLabel")
+UsernameLabel.Size = UDim2.new(1, -30, 0, 14)
+UsernameLabel.Position = UDim2.new(0, 12, 0, 32)
+UsernameLabel.BackgroundTransparency = 1
+UsernameLabel.Font = Enum.Font.Gotham
+UsernameLabel.Text = "用户: " .. LP.Name
+UsernameLabel.TextColor3 = ColorPalette.TextGray
+UsernameLabel.TextSize = 10
+UsernameLabel.TextXAlignment = Enum.TextXAlignment.Left
+UsernameLabel.Parent = Main
+
+-- 最小化按钮
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 22, 0, 22)
+MinBtn.Position = UDim2.new(1, -50, 0, 5)
+MinBtn.BackgroundColor3 = ColorPalette.BackgroundLight
+MinBtn.Text = "_"
+MinBtn.TextColor3 = ColorPalette.TextLight
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 12
+MinBtn.BorderSizePixel = 0
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 5)
+MinBtn.Parent = TitleBar
+
+-- 关闭按钮
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 22, 0, 22)
+CloseBtn.Position = UDim2.new(1, -26, 0, 5)
+CloseBtn.BackgroundColor3 = ColorPalette.AccentRed
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = ColorPalette.TextLight
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 12
+CloseBtn.BorderSizePixel = 0
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
+CloseBtn.Parent = TitleBar
+CloseBtn.MouseButton1Click:Connect(function()
+    FengUI.DigitalParticleExplosion(CloseBtn)
+    task.wait(0.3)
+    Gui:Destroy()
+end)
+
+-- 悬浮球
+local FloatBall
+MinBtn.MouseButton1Click:Connect(function()
+    Main.Visible = false
+    if not FloatBall then
+        FloatBall = Instance.new("TextButton")
+        FloatBall.Size = UDim2.new(0, 40, 0, 40)
+        FloatBall.Position = UDim2.new(0, 10, 0, 10)
+        FloatBall.BackgroundColor3 = ColorPalette.BackgroundMedium
+        FloatBall.Text = "杀"
+        FloatBall.TextColor3 = ColorPalette.TextLight
+        FloatBall.Font = Enum.Font.GothamBold
+        FloatBall.TextSize = 16
+        FloatBall.BorderSizePixel = 0
+        FloatBall.Active = true
+        FloatBall.Draggable = true
+        FloatBall.Parent = Gui
+        Instance.new("UICorner", FloatBall).CornerRadius = UDim.new(0, 8)
+        FloatBall.MouseButton1Click:Connect(function()
+            Main.Visible = true
+            FloatBall:Destroy()
+            FloatBall = nil
+        end)
+    else
+        FloatBall.Visible = true
+    end
+end)
+
+-- 简介分组
+local InfoGroup = Instance.new("Frame")
+InfoGroup.Size = UDim2.new(1, -20, 0, 70)
+InfoGroup.Position = UDim2.new(0, 10, 0, 50)
+InfoGroup.BackgroundColor3 = ColorPalette.BackgroundLight
+InfoGroup.BackgroundTransparency = 0.5
+InfoGroup.BorderSizePixel = 0
+InfoGroup.Parent = Main
+Instance.new("UICorner", InfoGroup).CornerRadius = UDim.new(0, 6)
+
+local InfoTitle = Instance.new("TextLabel")
+InfoTitle.Size = UDim2.new(1, 0, 0, 18)
+InfoTitle.BackgroundTransparency = 1
+InfoTitle.Font = Enum.Font.GothamBold
+InfoTitle.Text = "简介 | 作者: jgft616"
+InfoTitle.TextColor3 = ColorPalette.TextLight
+InfoTitle.TextSize = 10
+InfoTitle.TextXAlignment = Enum.TextXAlignment.Left
+InfoTitle.Position = UDim2.new(0, 8, 0, 4)
+InfoTitle.Parent = InfoGroup
+
+local InfoContent = Instance.new("TextLabel")
+InfoContent.Size = UDim2.new(1, -16, 0, 30)
+InfoContent.Position = UDim2.new(0, 8, 0, 22)
+InfoContent.BackgroundTransparency = 1
+InfoContent.Font = Enum.Font.Gotham
+InfoContent.Text = "B站: jgft616 | QQ: 2969300867"
+InfoContent.TextColor3 = ColorPalette.TextGray
+InfoContent.TextSize = 9
+InfoContent.TextXAlignment = Enum.TextXAlignment.Left
+InfoContent.TextWrapped = true
+InfoContent.Parent = InfoGroup
+
+local CopyQQBtn = Instance.new("TextButton")
+CopyQQBtn.Size = UDim2.new(0, 90, 0, 18)
+CopyQQBtn.Position = UDim2.new(0, 8, 0, 50)
+CopyQQBtn.BackgroundColor3 = ColorPalette.BackgroundMedium
+CopyQQBtn.Text = "复制Q群: 1046798871"
+CopyQQBtn.TextColor3 = ColorPalette.TextLight
+CopyQQBtn.Font = Enum.Font.Gotham
+CopyQQBtn.TextSize = 8
+CopyQQBtn.BorderSizePixel = 0
+Instance.new("UICorner", CopyQQBtn).CornerRadius = UDim.new(0, 4)
+CopyQQBtn.Parent = InfoGroup
+CopyQQBtn.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard("1046798871") end)
+    CopyQQBtn.Text = "已复制"
+    task.wait(1)
+    CopyQQBtn.Text = "复制Q群: 1046798871"
+end)
+
+-- 全服秒杀开关 (功能文本不变)
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(1, -20, 0, 30)
+ToggleBtn.Position = UDim2.new(0, 10, 0, 125)
+ToggleBtn.BackgroundColor3 = ColorPalette.AccentRed
+ToggleBtn.Text = "全服秒杀 [OFF]"
+ToggleBtn.TextColor3 = ColorPalette.TextLight
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.TextSize = 12
+ToggleBtn.BorderSizePixel = 0
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
+ToggleBtn.Parent = Main
+
+local on = false
+ToggleBtn.MouseButton1Click:Connect(function()
+    on = not on
+    ToggleBtn.BackgroundColor3 = on and ColorPalette.AccentGreen or ColorPalette.AccentRed
+    ToggleBtn.Text = on and "全服秒杀 [ON]" or "全服秒杀 [OFF]"
+    FengUI.DigitalParticleExplosion(ToggleBtn)
+    toggleKillAll(on)
+end)
+
+notify("脚本已加载", "全服秒杀 - jgft616")
+print("FengUI全服秒杀脚本已加载 - 作者 jgft616")
