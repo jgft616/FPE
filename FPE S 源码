@@ -1,5 +1,5 @@
 --[[
-    FPE:S 完整版（移除命中透视）
+    FPE:S 完整版（移除防御组）
     作者：jgft616
 --]]
 
@@ -8,7 +8,6 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local LP = Players.LocalPlayer
 
 local UserName = LP.Name
@@ -35,26 +34,6 @@ local TeamCheckEnabled = true
 local NightVisionEnabled = false
 local BatRangeEnabled = false
 local BatRangeValue = 5
-
--- 自动格挡（音频）状态
-local AutoBlockAudioEnabled = false
-local BlockDetectionRangeAudio = 25
-local LastBlockTimeAudio = 0
-local BLOCK_COOLDOWN_AUDIO = 1.3
-local AudioBlockConnection = nil
-
--- 自动格挡（动画）状态
-local AutoBlockAnimEnabled = false
-local BlockDetectionRangeAnim = 25
-local LastBlockTimeAnim = 0
-local BLOCK_COOLDOWN_ANIM = 1.3
-local AnimBlockConnection = nil
-
--- 攻击动画ID列表
-local teacherAttackAnimIDs = {
-    17492938294, 17492940267, 17605409993, 17605403503,
-    18593007074, 18592978117, 81704410466143, 140314441187252,
-}
 
 -- ========== 队伍检测 ==========
 local function IsTeammate(player)
@@ -235,104 +214,6 @@ spawn(function()
     end
 end)
 
--- ========== 自动格挡（音频） ==========
-local function checkSoundPlaying(sound)
-    if not sound then return false end
-    if sound:IsA("Sound") then
-        if sound.IsLoaded and sound.TimeLength > 0 then
-            return sound.TimePosition > 0 and sound.TimePosition < sound.TimeLength
-        end
-        return sound.Playing
-    end
-    return false
-end
-
-local function checkForAttackAudio()
-    local character = LP.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
-    local myPosition = character.HumanoidRootPart.Position
-    local teachersFolder = workspace:FindFirstChild("Teachers")
-    if not teachersFolder then return end
-    
-    for _, teacher in pairs(teachersFolder:GetChildren()) do
-        if teacher:IsA("Model") then
-            local teacherRoot = teacher:FindFirstChild("HumanoidRootPart")
-            if teacherRoot then
-                local distance = (teacherRoot.Position - myPosition).Magnitude
-                if distance > BlockDetectionRangeAudio then continue end
-                
-                for _, sound in pairs(teacher:GetDescendants()) do
-                    if sound.Name == "SwingSFX" and checkSoundPlaying(sound) then
-                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
-                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
-                        return
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function startAudioBlockLoop()
-    if AudioBlockConnection then AudioBlockConnection:Disconnect() end
-    AudioBlockConnection = RunService.Heartbeat:Connect(function()
-        if AutoBlockAudioEnabled then checkForAttackAudio() end
-    end)
-end
-
--- ========== 自动格挡（动画） ==========
-local function isTeacherAttacking(teacher)
-    local humanoid = teacher:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
-    
-    for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
-        if track.Animation then
-            local animId = track.Animation.AnimationId
-            local idMatch = animId:match("%d+")
-            if idMatch then
-                for _, attackId in ipairs(teacherAttackAnimIDs) do
-                    if tonumber(idMatch) == attackId then return true end
-                end
-            end
-        end
-    end
-    return false
-end
-
-local function checkForAttackAnim()
-    local character = LP.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
-    local myPosition = character.HumanoidRootPart.Position
-    local teachersFolder = workspace:FindFirstChild("Teachers")
-    if not teachersFolder then return end
-    
-    for _, teacher in pairs(teachersFolder:GetChildren()) do
-        if teacher:IsA("Model") then
-            local teacherRoot = teacher:FindFirstChild("HumanoidRootPart")
-            if teacherRoot then
-                local distance = (teacherRoot.Position - myPosition).Magnitude
-                if distance > BlockDetectionRangeAnim then continue end
-                
-                if isTeacherAttacking(teacher) then
-                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
-                    task.wait(0.1)
-                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
-                    break
-                end
-            end
-        end
-    end
-end
-
-local function startAnimBlockLoop()
-    if AnimBlockConnection then AnimBlockConnection:Disconnect() end
-    AnimBlockConnection = RunService.Heartbeat:Connect(function()
-        if AutoBlockAnimEnabled then checkForAttackAnim() end
-    end)
-end
-
 -- ========== 应用设置 ==========
 local function applyAllSettings()
     local char = LP.Character
@@ -364,20 +245,6 @@ local function setStaminaRecovery(val) StaminaRecoveryValue = tonumber(val) or S
 local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "已获取: " .. name) end
 local function toggleBatRange(on) BatRangeEnabled = on; notify("球棒范围", on and "已开启" or "已关闭") end
 local function setBatRange(val) BatRangeValue = tonumber(val) or BatRangeValue end
-
--- 自动格挡控制
-local function toggleAudioBlock(on)
-    AutoBlockAudioEnabled = on
-    if on then startAudioBlockLoop()
-    else if AudioBlockConnection then AudioBlockConnection:Disconnect(); AudioBlockConnection = nil end end
-    notify("自动格挡(音频)", on and "已开启" or "已关闭")
-end
-local function toggleAnimBlock(on)
-    AutoBlockAnimEnabled = on
-    if on then startAnimBlockLoop()
-    else if AnimBlockConnection then AnimBlockConnection:Disconnect(); AnimBlockConnection = nil end end
-    notify("自动格挡(动画)", on and "已开启" or "已关闭")
-end
 
 -- ========== 传送 ==========
 local function teleport(x, y, z)
@@ -479,9 +346,6 @@ closeBtn.MouseButton1Click:Connect(function()
     ESPEnabled = false; clearESP()
     if NightVisionEnabled then toggleNightVision(false) end
     BatRangeEnabled = false
-    AutoBlockAudioEnabled = false; AutoBlockAnimEnabled = false
-    if AudioBlockConnection then AudioBlockConnection:Disconnect() end
-    if AnimBlockConnection then AnimBlockConnection:Disconnect() end
     applyAllSettings(); gui:Destroy()
 end)
 
@@ -617,10 +481,6 @@ warningLabel.Text = "球棒攻击范围不要调太大要不然攻击不到"
 warningLabel.Font = Enum.Font.Gotham; warningLabel.TextSize = 9; warningLabel.TextColor3 = C.Gray
 warningLabel.TextXAlignment = Enum.TextXAlignment.Left
 warningLabel.Parent = scroll; updateCanvas()
-
-addLabel("防御")
-addToggle("自动格挡(音频)", false, toggleAudioBlock)
-addToggle("自动格挡(动画)", false, toggleAnimBlock)
 
 -- 传送组
 addLabel("传送")
@@ -760,5 +620,5 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-notify("FPE:S 脚本", "已移除命中透视，自动格挡保留")
+notify("FPE:S 脚本", "防御组已移除")
 print("✅ FPE:S 脚本已更新 - 作者 jgft616")
