@@ -1,5 +1,5 @@
 --[[
-    FPE:S 紧凑版（修复传送标题显示）
+    FPE:S 完整版（移除命中透视）
     作者：jgft616
 --]]
 
@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local LP = Players.LocalPlayer
 
 local UserName = LP.Name
@@ -32,30 +33,28 @@ local PassesEnabled = { OwnsAlicePass = false, HasVIP = false, HasSwap = false }
 local ESPEnabled = false
 local TeamCheckEnabled = true
 local NightVisionEnabled = false
+local BatRangeEnabled = false
+local BatRangeValue = 5
 
--- ========== 夜视 ==========
-local function toggleNightVision(on)
-    NightVisionEnabled = on
-    if on then
-        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-        Lighting.Brightness = 3
-        notify("夜视", "✅ 已开启")
-    else
-        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
-        Lighting.Brightness = 1
-        notify("夜视", "已关闭")
-    end
-end
-spawn(function()
-    while task.wait(1) do
-        if NightVisionEnabled then
-            pcall(function()
-                Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-                Lighting.Brightness = 3
-            end)
-        end
-    end
-end)
+-- 自动格挡（音频）状态
+local AutoBlockAudioEnabled = false
+local BlockDetectionRangeAudio = 25
+local LastBlockTimeAudio = 0
+local BLOCK_COOLDOWN_AUDIO = 1.3
+local AudioBlockConnection = nil
+
+-- 自动格挡（动画）状态
+local AutoBlockAnimEnabled = false
+local BlockDetectionRangeAnim = 25
+local LastBlockTimeAnim = 0
+local BLOCK_COOLDOWN_ANIM = 1.3
+local AnimBlockConnection = nil
+
+-- 攻击动画ID列表
+local teacherAttackAnimIDs = {
+    17492938294, 17492940267, 17605409993, 17605403503,
+    18593007074, 18592978117, 81704410466143, 140314441187252,
+}
 
 -- ========== 队伍检测 ==========
 local function IsTeammate(player)
@@ -77,9 +76,33 @@ end
 
 local function toggleTeamCheck(on)
     TeamCheckEnabled = on
-    notify("队伍检测", on and "✅ 已开启（队友绿/敌人红）" or "已关闭（全部视为敌人）")
+    notify("队伍检测", on and "已开启（队友绿/敌人红）" or "已关闭（全部视为敌人）")
     if ESPEnabled then refreshESP() end
 end
+
+-- ========== 夜视 ==========
+local function toggleNightVision(on)
+    NightVisionEnabled = on
+    if on then
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        Lighting.Brightness = 3
+        notify("夜视", "已开启")
+    else
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+        Lighting.Brightness = 1
+        notify("夜视", "已关闭")
+    end
+end
+spawn(function()
+    while task.wait(1) do
+        if NightVisionEnabled then
+            pcall(function()
+                Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+                Lighting.Brightness = 3
+            end)
+        end
+    end
+end)
 
 -- ========== 透视系统 ==========
 local espObjects = {}
@@ -163,7 +186,7 @@ local function toggleESP(on)
     ESPEnabled = on
     if on then
         refreshESP()
-        notify("透视", "✅ 已开启（0.1秒刷新，重生立即显示）")
+        notify("透视", "已开启（0.1秒刷新，重生立即显示）")
     else
         clearESP()
         notify("透视", "已关闭")
@@ -193,6 +216,123 @@ spawn(function()
     end
 end)
 
+-- ========== 球棒攻击范围 ==========
+spawn(function()
+    while task.wait(0.3) do
+        if BatRangeEnabled then
+            local tool = LP.Character and LP.Character:FindFirstChild("Bat")
+            if not tool then tool = LP.Backpack:FindFirstChild("Bat") end
+            if tool then
+                pcall(function()
+                    tool:SetAttribute("HitboxSize", Vector3.new(BatRangeValue, BatRangeValue, BatRangeValue))
+                end)
+                local hitboxVal = tool:FindFirstChild("HitboxSize")
+                if hitboxVal and hitboxVal:IsA("Vector3Value") then
+                    hitboxVal.Value = Vector3.new(BatRangeValue, BatRangeValue, BatRangeValue)
+                end
+            end
+        end
+    end
+end)
+
+-- ========== 自动格挡（音频） ==========
+local function checkSoundPlaying(sound)
+    if not sound then return false end
+    if sound:IsA("Sound") then
+        if sound.IsLoaded and sound.TimeLength > 0 then
+            return sound.TimePosition > 0 and sound.TimePosition < sound.TimeLength
+        end
+        return sound.Playing
+    end
+    return false
+end
+
+local function checkForAttackAudio()
+    local character = LP.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local myPosition = character.HumanoidRootPart.Position
+    local teachersFolder = workspace:FindFirstChild("Teachers")
+    if not teachersFolder then return end
+    
+    for _, teacher in pairs(teachersFolder:GetChildren()) do
+        if teacher:IsA("Model") then
+            local teacherRoot = teacher:FindFirstChild("HumanoidRootPart")
+            if teacherRoot then
+                local distance = (teacherRoot.Position - myPosition).Magnitude
+                if distance > BlockDetectionRangeAudio then continue end
+                
+                for _, sound in pairs(teacher:GetDescendants()) do
+                    if sound.Name == "SwingSFX" and checkSoundPlaying(sound) then
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+                        return
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function startAudioBlockLoop()
+    if AudioBlockConnection then AudioBlockConnection:Disconnect() end
+    AudioBlockConnection = RunService.Heartbeat:Connect(function()
+        if AutoBlockAudioEnabled then checkForAttackAudio() end
+    end)
+end
+
+-- ========== 自动格挡（动画） ==========
+local function isTeacherAttacking(teacher)
+    local humanoid = teacher:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    
+    for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+        if track.Animation then
+            local animId = track.Animation.AnimationId
+            local idMatch = animId:match("%d+")
+            if idMatch then
+                for _, attackId in ipairs(teacherAttackAnimIDs) do
+                    if tonumber(idMatch) == attackId then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function checkForAttackAnim()
+    local character = LP.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local myPosition = character.HumanoidRootPart.Position
+    local teachersFolder = workspace:FindFirstChild("Teachers")
+    if not teachersFolder then return end
+    
+    for _, teacher in pairs(teachersFolder:GetChildren()) do
+        if teacher:IsA("Model") then
+            local teacherRoot = teacher:FindFirstChild("HumanoidRootPart")
+            if teacherRoot then
+                local distance = (teacherRoot.Position - myPosition).Magnitude
+                if distance > BlockDetectionRangeAnim then continue end
+                
+                if isTeacherAttacking(teacher) then
+                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+                    task.wait(0.1)
+                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+                    break
+                end
+            end
+        end
+    end
+end
+
+local function startAnimBlockLoop()
+    if AnimBlockConnection then AnimBlockConnection:Disconnect() end
+    AnimBlockConnection = RunService.Heartbeat:Connect(function()
+        if AutoBlockAnimEnabled then checkForAttackAnim() end
+    end)
+end
+
 -- ========== 应用设置 ==========
 local function applyAllSettings()
     local char = LP.Character
@@ -213,15 +353,31 @@ local function toggleMaxStamina(on)
     MaxStaminaEnabled = on
     if not on then pcall(function() local char = LP.Character; if char then char:SetAttribute("MaxStamina", 100) end end) end
     applyAllSettings()
-    notify("最大体力", on and "✅ 已开启" or "已关闭")
+    notify("最大体力", on and "已开启" or "已关闭")
 end
 local function setMaxStamina(val) MaxStaminaValue = tonumber(val) or MaxStaminaValue; if MaxStaminaEnabled then applyAllSettings() end end
 local function toggleStaminaRecovery(on)
     StaminaRecoveryEnabled = on; applyAllSettings()
-    notify("体力恢复", on and "✅ 已开启" or "已关闭")
+    notify("体力恢复", on and "已开启" or "已关闭")
 end
 local function setStaminaRecovery(val) StaminaRecoveryValue = tonumber(val) or StaminaRecoveryValue; if StaminaRecoveryEnabled then applyAllSettings() end end
-local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "✅ 已获取: " .. name) end
+local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "已获取: " .. name) end
+local function toggleBatRange(on) BatRangeEnabled = on; notify("球棒范围", on and "已开启" or "已关闭") end
+local function setBatRange(val) BatRangeValue = tonumber(val) or BatRangeValue end
+
+-- 自动格挡控制
+local function toggleAudioBlock(on)
+    AutoBlockAudioEnabled = on
+    if on then startAudioBlockLoop()
+    else if AudioBlockConnection then AudioBlockConnection:Disconnect(); AudioBlockConnection = nil end end
+    notify("自动格挡(音频)", on and "已开启" or "已关闭")
+end
+local function toggleAnimBlock(on)
+    AutoBlockAnimEnabled = on
+    if on then startAnimBlockLoop()
+    else if AnimBlockConnection then AnimBlockConnection:Disconnect(); AnimBlockConnection = nil end end
+    notify("自动格挡(动画)", on and "已开启" or "已关闭")
+end
 
 -- ========== 传送 ==========
 local function teleport(x, y, z)
@@ -230,7 +386,7 @@ local function teleport(x, y, z)
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then notify("传送失败", "未找到 HumanoidRootPart"); return end
     pcall(function() hrp.CFrame = CFrame.new(x, y, z) end)
-    notify("传送", "✅ 已到达")
+    notify("传送", "已到达")
 end
 
 -- ========== 门删除 ==========
@@ -268,7 +424,7 @@ local function deleteSkinShop()
     end
     local collisions = map:FindFirstChild("CollisionBoxes")
     if collisions then pcall(function() collisions:FindFirstChild("StorageDoorCollision"):Destroy() end) end
-    notify("皮肤商店删除", "✅ 已删除所有皮肤商店相关对象")
+    notify("皮肤商店删除", "已删除所有皮肤商店相关对象")
 end
 
 -- ==================== GUI ====================
@@ -322,6 +478,10 @@ closeBtn.MouseButton1Click:Connect(function()
     for k in pairs(PassesEnabled) do PassesEnabled[k] = false end
     ESPEnabled = false; clearESP()
     if NightVisionEnabled then toggleNightVision(false) end
+    BatRangeEnabled = false
+    AutoBlockAudioEnabled = false; AutoBlockAnimEnabled = false
+    if AudioBlockConnection then AudioBlockConnection:Disconnect() end
+    if AnimBlockConnection then AnimBlockConnection:Disconnect() end
     applyAllSettings(); gui:Destroy()
 end)
 
@@ -351,38 +511,28 @@ local function updateCanvas()
     scroll.CanvasSize = UDim2.new(0, 0, 0, totalHeight + 8)
 end
 
--- 紧凑控件函数
+-- 控件函数
 local function addLabel(text)
     local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, 16)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = text
-    lbl.Font = Enum.Font.GothamBold
-    lbl.TextSize = 11
-    lbl.TextColor3 = C.Acc
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = scroll
-    updateCanvas()
+    lbl.Size = UDim2.new(1, 0, 0, 16); lbl.BackgroundTransparency = 1
+    lbl.Text = text; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 11
+    lbl.TextColor3 = C.Acc; lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = scroll; updateCanvas()
 end
 
 local function addToggleWithInput(labelText, defaultVal, toggleCallback, inputCallback)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 22)
-    frame.BackgroundTransparency = 1
-    frame.Parent = scroll
-
+    frame.Size = UDim2.new(1, 0, 0, 22); frame.BackgroundTransparency = 1; frame.Parent = scroll
     local label = Instance.new("TextLabel", frame)
     label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 10
     label.TextColor3 = C.Text; label.BackgroundTransparency = 1
     label.Size = UDim2.new(0, 90, 1, 0); label.TextXAlignment = 0
-
     local input = Instance.new("TextBox", frame)
     input.Size = UDim2.new(1, -140, 0, 18); input.Position = UDim2.new(0, 92, 0, 2)
     input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal)
     input.Font = Enum.Font.Gotham; input.TextSize = 10; input.TextColor3 = C.Text
     input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
     Instance.new("UICorner", input).CornerRadius = UDim.new(0, 4)
-
     local switch = Instance.new("TextButton", frame)
     switch.Size = UDim2.new(0, 34, 0, 16); switch.Position = UDim2.new(1, -38, 0.5, -8)
     switch.BackgroundColor3 = C.Gray; switch.Text = ""; switch.AutoButtonColor = false
@@ -391,7 +541,6 @@ local function addToggleWithInput(labelText, defaultVal, toggleCallback, inputCa
     knob.Size = UDim2.new(0, 12, 0, 12); knob.Position = UDim2.new(0, 2, 0.5, -6)
     knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
-
     local state = false
     switch.MouseButton1Click:Connect(function()
         state = not state
@@ -408,15 +557,11 @@ end
 
 local function addToggle(labelText, default, callback)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 22)
-    frame.BackgroundTransparency = 1
-    frame.Parent = scroll
-
+    frame.Size = UDim2.new(1, 0, 0, 22); frame.BackgroundTransparency = 1; frame.Parent = scroll
     local label = Instance.new("TextLabel", frame)
     label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
     label.TextColor3 = C.Text; label.BackgroundTransparency = 1
     label.Size = UDim2.new(0, 135, 1, 0); label.TextXAlignment = 0
-
     local switch = Instance.new("TextButton", frame)
     switch.Size = UDim2.new(0, 36, 0, 18); switch.Position = UDim2.new(1, -40, 0.5, -9)
     switch.BackgroundColor3 = default and C.Green or C.Gray; switch.Text = ""; switch.AutoButtonColor = false
@@ -426,7 +571,6 @@ local function addToggle(labelText, default, callback)
     knob.Position = default and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
     knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
     Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
-
     local state = default or false
     switch.MouseButton1Click:Connect(function()
         state = not state
@@ -439,8 +583,7 @@ end
 
 local function addButton(text, callback)
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 26)
-    btn.BackgroundColor3 = C.Acc
+    btn.Size = UDim2.new(1, 0, 0, 26); btn.BackgroundColor3 = C.Acc
     btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.TextColor3 = Color3.fromRGB(255,255,255)
     btn.AutoButtonColor = false
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
@@ -448,8 +591,7 @@ local function addButton(text, callback)
         btn.BackgroundColor3 = C.Green; btn.Text = "✅ " .. text; callback()
         task.wait(1.5); btn.BackgroundColor3 = C.Acc; btn.Text = text
     end)
-    btn.Parent = scroll
-    updateCanvas()
+    btn.Parent = scroll; updateCanvas()
 end
 
 -- ====== 构建分组 ======
@@ -467,25 +609,35 @@ addButton("获取爱丽丝通行证", function() getPass("爱丽丝通行证", "
 addButton("获取 VIP", function() getPass("VIP", "HasVIP") end)
 addButton("获取交换通行证", function() getPass("交换通行证", "HasSwap") end)
 
--- ====== 传送组 ======
+addLabel("攻击")
+addToggleWithInput("球棒范围", 5, toggleBatRange, setBatRange)
+local warningLabel = Instance.new("TextLabel")
+warningLabel.Size = UDim2.new(1, 0, 0, 14); warningLabel.BackgroundTransparency = 1
+warningLabel.Text = "球棒攻击范围不要调太大要不然攻击不到"
+warningLabel.Font = Enum.Font.Gotham; warningLabel.TextSize = 9; warningLabel.TextColor3 = C.Gray
+warningLabel.TextXAlignment = Enum.TextXAlignment.Left
+warningLabel.Parent = scroll; updateCanvas()
+
+addLabel("防御")
+addToggle("自动格挡(音频)", false, toggleAudioBlock)
+addToggle("自动格挡(动画)", false, toggleAnimBlock)
+
+-- 传送组
 addLabel("传送")
 
 local listExpanded = false
 local listToggle = Instance.new("TextButton")
-listToggle.Size = UDim2.new(1, 0, 0, 20)
-listToggle.BackgroundColor3 = C.Bg2
-listToggle.Font = Enum.Font.GothamBold; listToggle.TextSize = 10
-listToggle.TextColor3 = C.Text; listToggle.Text = "▶ 选择地点"; listToggle.AutoButtonColor = false
-Instance.new("UICorner", listToggle).CornerRadius = UDim.new(0, 4)
-listToggle.Parent = scroll
+listToggle.Size = UDim2.new(1, 0, 0, 20); listToggle.BackgroundColor3 = C.Bg2
+listToggle.Font = Enum.Font.GothamBold; listToggle.TextSize = 10; listToggle.TextColor3 = C.Text
+listToggle.Text = "▶ 选择地点"; listToggle.AutoButtonColor = false
+Instance.new("UICorner", listToggle).CornerRadius = UDim.new(0, 4); listToggle.Parent = scroll
 
 local listContent = Instance.new("Frame")
 listContent.BackgroundTransparency = 1; listContent.Size = UDim2.new(1, 0, 0, 0); listContent.Visible = false
 listContent.Parent = scroll
 
 local teleListFrame = Instance.new("Frame", listContent)
-teleListFrame.Size = UDim2.new(1, 0, 0, 100)
-teleListFrame.BackgroundColor3 = Color3.fromRGB(35,35,45); teleListFrame.BorderSizePixel = 0
+teleListFrame.Size = UDim2.new(1, 0, 0, 100); teleListFrame.BackgroundColor3 = Color3.fromRGB(35,35,45); teleListFrame.BorderSizePixel = 0
 Instance.new("UICorner", teleListFrame).CornerRadius = UDim.new(0, 6)
 
 local teleScroll = Instance.new("ScrollingFrame", teleListFrame)
@@ -502,14 +654,8 @@ local selectedCoords, selectedName = nil, ""
 
 local function collapseTeleport()
     if listExpanded then
-        listExpanded = false
-        listContent.Visible = false
-        listContent.Size = UDim2.new(1, 0, 0, 0)
-        if selectedName then
-            listToggle.Text = selectedName
-        else
-            listToggle.Text = "▶ 选择地点"
-        end
+        listExpanded = false; listContent.Visible = false; listContent.Size = UDim2.new(1, 0, 0, 0)
+        listToggle.Text = selectedName or "▶ 选择地点"
         updateCanvas()
     end
 end
@@ -533,8 +679,7 @@ local telePoints = {
 
 for _, tp in ipairs(telePoints) do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 18)
-    btn.BackgroundColor3 = C.Acc; btn.Font = Enum.Font.Gotham; btn.TextSize = 10
+    btn.Size = UDim2.new(1, 0, 0, 18); btn.BackgroundColor3 = C.Acc; btn.Font = Enum.Font.Gotham; btn.TextSize = 10
     btn.TextColor3 = Color3.fromRGB(255,255,255); btn.Text = tp.name; btn.AutoButtonColor = false
     btn.Parent = teleScroll; teleButtons[btn] = tp
 
@@ -549,12 +694,9 @@ for _, tp in ipairs(telePoints) do
 end
 
 local teleBtn = Instance.new("TextButton")
-teleBtn.Size = UDim2.new(1, 0, 0, 26)
-teleBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
-teleBtn.Text = "传送"; teleBtn.Font = Enum.Font.GothamBold; teleBtn.TextSize = 11
-teleBtn.TextColor3 = Color3.fromRGB(255,255,255)
-Instance.new("UICorner", teleBtn).CornerRadius = UDim.new(0, 6)
-teleBtn.Parent = scroll
+teleBtn.Size = UDim2.new(1, 0, 0, 26); teleBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+teleBtn.Text = "传送"; teleBtn.Font = Enum.Font.GothamBold; teleBtn.TextSize = 11; teleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+Instance.new("UICorner", teleBtn).CornerRadius = UDim.new(0, 6); teleBtn.Parent = scroll
 
 teleBtn.MouseButton1Click:Connect(function()
     if selectedCoords then teleport(selectedCoords.X, selectedCoords.Y, selectedCoords.Z)
@@ -562,29 +704,18 @@ teleBtn.MouseButton1Click:Connect(function()
 end)
 
 local selectedLabel = Instance.new("TextLabel")
-selectedLabel.Size = UDim2.new(1, 0, 0, 12)
-selectedLabel.BackgroundTransparency = 1; selectedLabel.Font = Enum.Font.Gotham; selectedLabel.TextSize = 10
+selectedLabel.Size = UDim2.new(1, 0, 0, 12); selectedLabel.BackgroundTransparency = 1; selectedLabel.Font = Enum.Font.Gotham; selectedLabel.TextSize = 10
 selectedLabel.TextColor3 = C.Gray; selectedLabel.Text = "未选择"; selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
 selectedLabel.Parent = scroll
 
 listToggle.MouseButton1Click:Connect(function()
     listExpanded = not listExpanded
     if listExpanded then
-        listContent.Visible = true
-        listContent.Size = UDim2.new(1, 0, 0, teleListFrame.Size.Y.Offset)
-        if selectedName then
-            listToggle.Text = "▼ " .. selectedName
-        else
-            listToggle.Text = "▼ 选择地点"
-        end
+        listContent.Visible = true; listContent.Size = UDim2.new(1, 0, 0, teleListFrame.Size.Y.Offset)
+        listToggle.Text = selectedName and "▼ " .. selectedName or "▼ 选择地点"
     else
-        if selectedName then
-            listToggle.Text = selectedName
-        else
-            listToggle.Text = "▶ 选择地点"
-        end
-        listContent.Visible = false
-        listContent.Size = UDim2.new(1, 0, 0, 0)
+        listToggle.Text = selectedName or "▶ 选择地点"
+        listContent.Visible = false; listContent.Size = UDim2.new(1, 0, 0, 0)
     end
     updateCanvas()
 end)
@@ -629,5 +760,5 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-notify("FPE:S", "选择地点后标题会显示地图名")
+notify("FPE:S 脚本", "已移除命中透视，自动格挡保留")
 print("✅ FPE:S 脚本已更新 - 作者 jgft616")
