@@ -1,5 +1,5 @@
 --[[
-    FPE:S 完整版（移除防御组）
+    FPE:S 完整版（自动格挡Q键方案 + 范围调节 + 提示文本）
     作者：jgft616
 --]]
 
@@ -8,6 +8,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local Lighting = game:GetService("Lighting")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local LP = Players.LocalPlayer
 
 local UserName = LP.Name
@@ -34,6 +35,19 @@ local TeamCheckEnabled = true
 local NightVisionEnabled = false
 local BatRangeEnabled = false
 local BatRangeValue = 5
+
+-- 自动格挡（模拟键盘Q键 + 音效/动画双检测）
+local AutoBlockEnabled = false
+local BlockDetectionRange = 25
+local BlockConnection = nil
+local LastBlockTime = 0
+local BLOCK_COOLDOWN = 1.3
+
+-- 攻击动画ID列表
+local teacherAttackAnimIDs = {
+    17492938294, 17492940267, 17605409993, 17605403503,
+    18593007074, 18592978117, 81704410466143, 140314441187252,
+}
 
 -- ========== 队伍检测 ==========
 local function IsTeammate(player)
@@ -214,6 +228,90 @@ spawn(function()
     end
 end)
 
+-- ========== 自动格挡（模拟键盘Q键） ==========
+local function checkSoundPlaying(sound)
+    if not sound then return false end
+    if sound:IsA("Sound") then
+        if sound.IsLoaded and sound.TimeLength > 0 then
+            return sound.TimePosition > 0 and sound.TimePosition < sound.TimeLength
+        end
+        return sound.Playing
+    end
+    return false
+end
+
+local function isTeacherAttacking(teacher)
+    local humanoid = teacher:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+        if track.Animation then
+            local animId = track.Animation.AnimationId
+            local idMatch = animId:match("%d+")
+            if idMatch then
+                for _, attackId in ipairs(teacherAttackAnimIDs) do
+                    if tonumber(idMatch) == attackId then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function pressBlockKey()
+    local currentTime = tick()
+    if currentTime - LastBlockTime < BLOCK_COOLDOWN then return end
+    LastBlockTime = currentTime
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+end
+
+local function checkForAttack()
+    local character = LP.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local myPosition = character.HumanoidRootPart.Position
+    local teachersFolder = workspace:FindFirstChild("Teachers")
+    if not teachersFolder then return end
+    
+    for _, teacher in pairs(teachersFolder:GetChildren()) do
+        if teacher:IsA("Model") then
+            local teacherRoot = teacher:FindFirstChild("HumanoidRootPart")
+            if teacherRoot then
+                local distance = (teacherRoot.Position - myPosition).Magnitude
+                if distance > BlockDetectionRange then continue end
+                
+                -- 音频检测
+                for _, sound in pairs(teacher:GetDescendants()) do
+                    if sound.Name == "SwingSFX" and checkSoundPlaying(sound) then
+                        pressBlockKey()
+                        return
+                    end
+                end
+                
+                -- 动画检测
+                if isTeacherAttacking(teacher) then
+                    pressBlockKey()
+                    return
+                end
+            end
+        end
+    end
+end
+
+local function startBlockLoop()
+    if BlockConnection then BlockConnection:Disconnect() end
+    BlockConnection = RunService.Heartbeat:Connect(function()
+        if AutoBlockEnabled then checkForAttack() end
+    end)
+end
+
+local function toggleAutoBlock(on)
+    AutoBlockEnabled = on
+    if on then startBlockLoop()
+    else if BlockConnection then BlockConnection:Disconnect(); BlockConnection = nil end end
+    notify("自动格挡", on and "已开启" or "已关闭")
+end
+
 -- ========== 应用设置 ==========
 local function applyAllSettings()
     local char = LP.Character
@@ -346,6 +444,8 @@ closeBtn.MouseButton1Click:Connect(function()
     ESPEnabled = false; clearESP()
     if NightVisionEnabled then toggleNightVision(false) end
     BatRangeEnabled = false
+    AutoBlockEnabled = false
+    if BlockConnection then BlockConnection:Disconnect() end
     applyAllSettings(); gui:Destroy()
 end)
 
@@ -481,6 +581,23 @@ warningLabel.Text = "球棒攻击范围不要调太大要不然攻击不到"
 warningLabel.Font = Enum.Font.Gotham; warningLabel.TextSize = 9; warningLabel.TextColor3 = C.Gray
 warningLabel.TextXAlignment = Enum.TextXAlignment.Left
 warningLabel.Parent = scroll; updateCanvas()
+
+addLabel("防御")
+addToggleWithInput("自动格挡", BlockDetectionRange, toggleAutoBlock, function(val)
+    local num = tonumber(val)
+    if num and num > 0 then BlockDetectionRange = num end
+end)
+-- 新增提示文本
+local blockBugLabel = Instance.new("TextLabel")
+blockBugLabel.Size = UDim2.new(1, 0, 0, 28); blockBugLabel.BackgroundTransparency = 1
+blockBugLabel.Text = "⚠ 格挡有一小点bug：格挡时会有一瞬间的动不了，如果你的延迟太高也可能格挡不到"
+blockBugLabel.Font = Enum.Font.Gotham
+blockBugLabel.TextSize = 9
+blockBugLabel.TextColor3 = C.Gray
+blockBugLabel.TextWrapped = true
+blockBugLabel.TextXAlignment = Enum.TextXAlignment.Left
+blockBugLabel.Parent = scroll
+updateCanvas()
 
 -- 传送组
 addLabel("传送")
@@ -620,5 +737,5 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-notify("FPE:S 脚本", "防御组已移除")
+notify("FPE:S 脚本", "自动格挡已开启，注意延迟可能影响格挡")
 print("✅ FPE:S 脚本已更新 - 作者 jgft616")
