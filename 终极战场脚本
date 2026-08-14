@@ -1,0 +1,1711 @@
+-- ==================== 第一部分开始：验证黑名单 + 白名单 + 卡密 + 动画 + 弹窗页面 ====================
+
+do
+    repeat task.wait() until game:IsLoaded()
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+    local StarterGui = game:GetService("StarterGui")
+
+    local Blacklist = {
+        ["AWE679341"] = true,
+        ["QWE6790341"] = true,
+        ["jgft145"] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+    }
+
+    local function isBlacklisted()
+        if Blacklist[LP.Name] then return true end
+        if Blacklist[LP.UserId] then return true end
+        return false
+    end
+
+    if isBlacklisted() then
+        LP:Kick("你被黑名单拉黑\n(你因为拿完脚本就退出)")
+        return
+    end
+end
+
+do
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+    local StarterGui = game:GetService("StarterGui")
+
+    local Whitelist = {
+        ["sakfjje"] = true,
+        ["ChenTetes5"] = true,
+        ["qetuo_162"] = true,
+        ["wc114214"] = true,
+        ["qazwsxdsadghv"] = true,
+        ["Hlioye"] = true,
+        ["uscsjsvsksjq"] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+        [""] = true,
+    }
+
+    local function isInWhitelist()
+        if Whitelist[LP.UserId] then return true end
+        for name in pairs(Whitelist) do
+            if type(name) == "string" and name:lower() == LP.Name:lower() then
+                return true
+            end
+        end
+        return false
+    end
+
+    _G.IsWhitelisted = isInWhitelist()
+    local CORRECT_KEY = "7891"
+
+    local function showSuccessAnimation(text)
+        local animGui = Instance.new("ScreenGui")
+        animGui.Name = "SuccessAnim"
+        animGui.Parent = LP:WaitForChild("PlayerGui")
+        animGui.ResetOnSpawn = false
+        animGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://70566611076599"
+        sound.Volume = 1
+        sound.Parent = animGui
+        sound:Play()
+
+        local overlay = Instance.new("Frame")
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        overlay.BackgroundTransparency = 0.4
+        overlay.BorderSizePixel = 0
+        overlay.Parent = animGui
+
+        local titleText = Instance.new("TextLabel")
+        titleText.Size = UDim2.new(0, 300, 0, 80)
+        titleText.Position = UDim2.new(0.5, -150, 0.5, -110)
+        titleText.BackgroundTransparency = 1
+        titleText.Text = "FPE:S"
+        titleText.Font = Enum.Font.GothamBlack
+        titleText.TextSize = 48
+        titleText.TextColor3 = Color3.fromRGB(0, 200, 255)
+        titleText.TextStrokeColor3 = Color3.fromRGB(0, 255, 255)
+        titleText.TextStrokeTransparency = 0.3
+        titleText.Parent = animGui
+
+        local progressBg = Instance.new("Frame")
+        progressBg.Size = UDim2.new(0, 200, 0, 4)
+        progressBg.Position = UDim2.new(0.5, -100, 0.5, 0)
+        progressBg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        progressBg.BackgroundTransparency = 0.5
+        progressBg.BorderSizePixel = 0
+        progressBg.Parent = animGui
+        Instance.new("UICorner", progressBg).CornerRadius = UDim.new(0, 2)
+
+        local progressFill = Instance.new("Frame")
+        progressFill.Size = UDim2.new(0, 0, 1, 0)
+        progressFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+        progressFill.BorderSizePixel = 0
+        progressFill.Parent = progressBg
+        Instance.new("UICorner", progressFill).CornerRadius = UDim.new(0, 2)
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0, 300, 0, 30)
+        label.Position = UDim2.new(0.5, -150, 0.5, 30)
+        label.BackgroundTransparency = 1
+        label.Text = text or "验证成功"
+        label.TextColor3 = Color3.fromRGB(255, 255, 255)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 18
+        label.Parent = animGui
+
+        local particleContainer = Instance.new("Frame")
+        particleContainer.Size = UDim2.new(0, 180, 0, 180)
+        particleContainer.Position = UDim2.new(0.5, -90, 0.5, -40)
+        particleContainer.BackgroundTransparency = 1
+        particleContainer.Parent = animGui
+
+        local TweenService = game:GetService("TweenService")
+
+        titleText.Size = UDim2.new(0, 0, 0, 0)
+        local textPop = TweenService:Create(titleText, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 300, 0, 80)})
+        textPop:Play()
+
+        label.TextTransparency = 1
+        local textTween = TweenService:Create(label, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+        textTween:Play()
+
+        local progressTween = TweenService:Create(progressFill, TweenInfo.new(1.8, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {Size = UDim2.new(1, 0, 1, 0)})
+        progressTween:Play()
+
+        local function spawnParticle()
+            local particle = Instance.new("Frame")
+            particle.Size = UDim2.new(0, 4, 0, 4)
+            particle.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
+            particle.BackgroundTransparency = 0.1
+            particle.BorderSizePixel = 0
+            Instance.new("UICorner", particle).CornerRadius = UDim.new(0, 1)
+            particle.Position = UDim2.new(0.5, math.random(-50, 50), 0.5, 20)
+            particle.Parent = particleContainer
+
+            local moveTween = TweenService:Create(particle, TweenInfo.new(1.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                Position = UDim2.new(0.5, math.random(-40, 40), 0.5, -150),
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 1, 0, 1)
+            })
+            moveTween:Play()
+            moveTween.Completed:Connect(function() particle:Destroy() end)
+        end
+
+        for i = 1, 10 do
+            task.delay(i * 0.1, spawnParticle)
+        end
+
+        task.delay(2.2, function()
+            local fadeOut = TweenService:Create(animGui, TweenInfo.new(0.3, Enum.EasingStyle.Linear), {Enabled = false})
+            fadeOut:Play()
+            fadeOut.Completed:Connect(function()
+                if sound then sound:Destroy() end
+                animGui:Destroy()
+            end)
+        end)
+    end
+
+    if not isInWhitelist() then
+        local keyScreen = Instance.new("ScreenGui")
+        keyScreen.Name = "KeyAuthUI"
+        keyScreen.Parent = LP:WaitForChild("PlayerGui")
+        keyScreen.ResetOnSpawn = false
+        keyScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+        local KeyFrame = Instance.new("Frame")
+        KeyFrame.Size = UDim2.new(0, 300, 0, 180)
+        KeyFrame.Position = UDim2.new(0.5, -150, 0.5, -90)
+        KeyFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+        KeyFrame.BorderSizePixel = 0
+        KeyFrame.Active = true
+        KeyFrame.Draggable = true
+        KeyFrame.Parent = keyScreen
+        Instance.new("UICorner", KeyFrame).CornerRadius = UDim.new(0, 10)
+
+        local KeyTitle = Instance.new("TextLabel")
+        KeyTitle.Size = UDim2.new(1, -20, 0, 30)
+        KeyTitle.Position = UDim2.new(0, 10, 0, 10)
+        KeyTitle.BackgroundTransparency = 1
+        KeyTitle.Text = "FPE:S 脚本 - 卡密验证"
+        KeyTitle.TextColor3 = Color3.fromRGB(255, 105, 180)
+        KeyTitle.Font = Enum.Font.GothamBold
+        KeyTitle.TextSize = 16
+        KeyTitle.Parent = KeyFrame
+
+        local KeyBox = Instance.new("TextBox")
+        KeyBox.Size = UDim2.new(0, 260, 0, 36)
+        KeyBox.Position = UDim2.new(0.5, -130, 0, 50)
+        KeyBox.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        KeyBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+        KeyBox.PlaceholderText = "请输入卡密"
+        KeyBox.Text = ""
+        KeyBox.Font = Enum.Font.Gotham
+        KeyBox.TextSize = 16
+        KeyBox.ClearTextOnFocus = false
+        KeyBox.Parent = KeyFrame
+        Instance.new("UICorner", KeyBox).CornerRadius = UDim.new(0, 6)
+
+        local KeyConfirm = Instance.new("TextButton")
+        KeyConfirm.Size = UDim2.new(0, 260, 0, 36)
+        KeyConfirm.Position = UDim2.new(0.5, -130, 0, 100)
+        KeyConfirm.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
+        KeyConfirm.TextColor3 = Color3.fromRGB(255, 255, 255)
+        KeyConfirm.Text = "确 认"
+        KeyConfirm.Font = Enum.Font.GothamBold
+        KeyConfirm.TextSize = 16
+        KeyConfirm.Parent = KeyFrame
+        Instance.new("UICorner", KeyConfirm).CornerRadius = UDim.new(0, 6)
+
+        local KeyClose = Instance.new("TextButton")
+        KeyClose.Size = UDim2.new(0, 30, 0, 30)
+        KeyClose.Position = UDim2.new(1, -35, 0, 5)
+        KeyClose.BackgroundTransparency = 1
+        KeyClose.Text = "✕"
+        KeyClose.TextColor3 = Color3.fromRGB(255, 80, 80)
+        KeyClose.Font = Enum.Font.GothamBold
+        KeyClose.TextSize = 20
+        KeyClose.Parent = KeyFrame
+
+        local shouldExit = false
+        local function verifyKey()
+            if KeyBox.Text == CORRECT_KEY then
+                StarterGui:SetCore("SendNotification", {
+                    Title = "验证通过",
+                    Text = "卡密正确，正在加载脚本...",
+                    Duration = 3
+                })
+                task.wait(0.5)
+                keyScreen:Destroy()
+            else
+                StarterGui:SetCore("SendNotification", {
+                    Title = "验证失败",
+                    Text = "卡密错误，请重新输入",
+                    Duration = 3
+                })
+                KeyBox.Text = ""
+                KeyBox:CaptureFocus()
+            end
+        end
+
+        KeyConfirm.MouseButton1Click:Connect(verifyKey)
+        KeyBox.FocusLost:Connect(function(enterPressed)
+            if enterPressed then verifyKey() end
+        end)
+        KeyClose.MouseButton1Click:Connect(function()
+            shouldExit = true
+            keyScreen:Destroy()
+        end)
+
+        repeat task.wait() until not keyScreen.Parent
+        if shouldExit then return end
+    else
+        StarterGui:SetCore("SendNotification", {
+            Title = "白名单验证通过",
+            Text = "欢迎使用 FPE:S 脚本",
+            Duration = 3,
+            Icon = "rbxassetid://915207093"
+        })
+        showSuccessAnimation("白名单验证通过")
+        task.wait(2)
+    end
+end
+
+-- ==================== 弹窗页面（所有玩家验证通过后显示） ====================
+do
+    local Players = game:GetService("Players")
+    local LP = Players.LocalPlayer
+    local TweenService = game:GetService("TweenService")
+
+    local NeverShowAd = false
+    if _G.IsWhitelisted then
+        local success, content = pcall(function() return readfile("FPES_Settings.json") end)
+        if success and content then
+            local success2, data = pcall(function() return game:GetService("HttpService"):JSONDecode(content) end)
+            if success2 and type(data) == "table" then
+                NeverShowAd = data.NeverShowAd or false
+            end
+        end
+    end
+
+    if not NeverShowAd then
+        local adGui = Instance.new("ScreenGui")
+        adGui.Name = "AdPopup"
+        adGui.Parent = LP:WaitForChild("PlayerGui")
+        adGui.ResetOnSpawn = false
+        adGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+        local overlay = Instance.new("Frame", adGui)
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        overlay.BackgroundTransparency = 0.5
+        overlay.BorderSizePixel = 0
+
+        local mainPopup = Instance.new("Frame", adGui)
+        mainPopup.Size = UDim2.new(0, 500, 0, 300)
+        mainPopup.Position = UDim2.new(0.5, -250, 0.5, -150)
+        mainPopup.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        mainPopup.BorderSizePixel = 0
+        Instance.new("UICorner", mainPopup).CornerRadius = UDim.new(0, 15)
+
+        local stroke = Instance.new("UIStroke", mainPopup)
+        stroke.Color = Color3.fromRGB(0, 150, 255)
+        stroke.Thickness = 3
+        stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+        local particleContainer = Instance.new("Frame", mainPopup)
+        particleContainer.Size = UDim2.new(1, 0, 1, 0)
+        particleContainer.BackgroundTransparency = 1
+
+        for i = 1, 20 do
+            local particle = Instance.new("Frame", particleContainer)
+            particle.Size = UDim2.new(0, 10, 0, 10)
+            particle.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+            particle.BackgroundTransparency = 0.2
+            particle.BorderSizePixel = 0
+            Instance.new("UICorner", particle).CornerRadius = UDim.new(0, 2)
+            particle.Position = UDim2.new(math.random(), 0, math.random(), 0)
+
+            spawn(function()
+                while particle.Parent do
+                    local newX = math.random()
+                    local newY = math.random()
+                    local tweenInfo = TweenInfo.new(2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, true)
+                    local tween = TweenService:Create(particle, tweenInfo, {Position = UDim2.new(newX, 0, newY, 0)})
+                    tween:Play()
+                    tween.Completed:Wait()
+                end
+            end)
+        end
+
+        local titleLabel = Instance.new("TextLabel", mainPopup)
+        titleLabel.Size = UDim2.new(1, -20, 0, 30)
+        titleLabel.Position = UDim2.new(0, 10, 0, 15)
+        titleLabel.BackgroundTransparency = 1
+        titleLabel.Text = "chain 全球最强脚本"
+        titleLabel.Font = Enum.Font.GothamBlack
+        titleLabel.TextSize = 20
+        titleLabel.TextColor3 = Color3.fromRGB(0, 150, 255)
+        titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+        local descLabel = Instance.new("TextLabel", mainPopup)
+        descLabel.Size = UDim2.new(1, -40, 0, 80)
+        descLabel.Position = UDim2.new(0, 20, 0, 55)
+        descLabel.BackgroundTransparency = 1
+        descLabel.Text = "有刷物品 无限闪避 等\n现在限时 20 原价 30 早买早享受\n群1104985377"
+        descLabel.Font = Enum.Font.Gotham
+        descLabel.TextSize = 16
+        descLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        descLabel.TextWrapped = true
+        descLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+        local buttonContainer = Instance.new("Frame", mainPopup)
+        buttonContainer.Size = UDim2.new(1, -40, 0, 50)
+        buttonContainer.Position = UDim2.new(0, 20, 1, -70)
+        buttonContainer.BackgroundTransparency = 1
+
+        local copyBtn = Instance.new("TextButton", buttonContainer)
+        copyBtn.Size = UDim2.new(0.45, 0, 1, 0)
+        copyBtn.Position = UDim2.new(0, 0, 0, 0)
+        copyBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+        copyBtn.Text = "复制群号"
+        copyBtn.Font = Enum.Font.GothamBold
+        copyBtn.TextSize = 16
+        copyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        copyBtn.AutoButtonColor = false
+        Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 10)
+
+        copyBtn.MouseButton1Click:Connect(function()
+            if setclipboard then
+                setclipboard("1104985377")
+            end
+            StarterGui:SetCore("SendNotification", {
+                Title = "复制成功",
+                Text = "群号已复制",
+                Duration = 2
+            })
+        end)
+
+        local closeBtn = Instance.new("TextButton", buttonContainer)
+        closeBtn.Size = UDim2.new(0.45, 0, 1, 0)
+        closeBtn.Position = UDim2.new(0.55, 0, 0, 0)
+        closeBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        closeBtn.Text = "关闭弹窗"
+        closeBtn.Font = Enum.Font.GothamBold
+        closeBtn.TextSize = 16
+        closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        closeBtn.AutoButtonColor = false
+        Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 10)
+
+        local function closeAdPopup()
+            local shrinkTween = TweenService:Create(mainPopup, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 0)})
+            shrinkTween:Play()
+            shrinkTween.Completed:Connect(function()
+                adGui:Destroy()
+            end)
+        end
+
+        closeBtn.MouseButton1Click:Connect(closeAdPopup)
+
+        if _G.IsWhitelisted then
+            local neverBtn = Instance.new("TextButton", mainPopup)
+            neverBtn.Size = UDim2.new(0, 130, 0, 30)
+            neverBtn.Position = UDim2.new(1, -140, 1, -40)
+            neverBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+            neverBtn.Text = "永不显示弹窗"
+            neverBtn.Font = Enum.Font.GothamBold
+            neverBtn.TextSize = 12
+            neverBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            neverBtn.AutoButtonColor = false
+            Instance.new("UICorner", neverBtn).CornerRadius = UDim.new(0, 8)
+
+            neverBtn.MouseButton1Click:Connect(function()
+                local existingData = {}
+                local success, content = pcall(function() return readfile("FPES_Settings.json") end)
+                if success and content then
+                    pcall(function() existingData = game:GetService("HttpService"):JSONDecode(content) end)
+                end
+                existingData.NeverShowAd = true
+                if writefile then
+                    writefile("FPES_Settings.json", game:GetService("HttpService"):JSONEncode(existingData))
+                end
+                closeAdPopup()
+            end)
+        end
+    end
+end
+
+-- ==================== 第一部分结束 ====================
+-- ==================== 第二部分开始：主脚本核心逻辑 ====================
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local Lighting = game:GetService("Lighting")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local TweenService = game:GetService("TweenService")
+local LP = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local UserName = LP.Name
+local C = {
+    Bg = Color3.fromRGB(18, 18, 25),
+    Bg2 = Color3.fromRGB(25, 25, 35),
+    Acc = Color3.fromRGB(255, 105, 180),
+    Text = Color3.fromRGB(220, 220, 240),
+    Gray = Color3.fromRGB(140, 140, 160),
+    Red = Color3.fromRGB(255, 80, 80),
+    Green = Color3.fromRGB(80, 200, 80),
+}
+local function notify(title, msg)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {Title = title, Text = msg or "", Duration = 3})
+    end)
+end
+
+-- 功能状态
+local MaxStaminaEnabled = false
+local MaxStaminaValue = 99999
+local StaminaRecoveryEnabled = false
+local StaminaRecoveryValue = 99999
+local PassesEnabled = { OwnsAlicePass = false, HasVIP = false, HasSwap = false }
+local ESPEnabled = false
+local TeamCheckEnabled = true
+local NightVisionEnabled = false
+local BatRangeEnabled = false
+local BatRangeValue = 5
+local AutoBlockEnabled = false
+local BlockDetectionRange = 25
+local BlockConnection = nil
+local LastBlockTime = 0
+local BLOCK_COOLDOWN = 3.5
+local SafeZoneAuto = false
+local SafeZoneHP = 25
+local LastTeleportTime = 0
+local TELEPORT_COOLDOWN = 3
+local SAFE_POSITION = Vector3.new(-310.66, 104.10, 287.00)
+local isTeleportingSafezone = false
+local SAFE_ARRIVE_DISTANCE = 5
+local LastHealthOnTrigger = nil
+local AdminCheckEnabled = false
+local PingDisplayEnabled = false
+local ServerPingDisplayEnabled = false
+local AliceGrabEnabled = false
+local ALICE_GRAB_SCALE = 1000000
+
+local teacherAttackAnimIDs = {
+    17492938294, 17492940267, 17605409993, 17605403503,
+    18593007074, 18592978117, 81704410466143, 140314441187252,
+}
+
+local currentMusicId = nil
+
+do
+    local success, content = pcall(function() return readfile("FPES_Settings.json") end)
+    if success and content then
+        local success2, data = pcall(function() return game:GetService("HttpService"):JSONDecode(content) end)
+        if success2 and type(data) == "table" then
+            MaxStaminaEnabled = data.MaxStaminaEnabled or MaxStaminaEnabled
+            MaxStaminaValue = data.MaxStaminaValue or MaxStaminaValue
+            StaminaRecoveryEnabled = data.StaminaRecoveryEnabled or StaminaRecoveryEnabled
+            StaminaRecoveryValue = data.StaminaRecoveryValue or StaminaRecoveryValue
+            ESPEnabled = data.ESPEnabled or ESPEnabled
+            TeamCheckEnabled = data.TeamCheckEnabled or TeamCheckEnabled
+            NightVisionEnabled = data.NightVisionEnabled or NightVisionEnabled
+            BatRangeEnabled = data.BatRangeEnabled or BatRangeEnabled
+            BatRangeValue = data.BatRangeValue or BatRangeValue
+            AutoBlockEnabled = data.AutoBlockEnabled or AutoBlockEnabled
+            BlockDetectionRange = data.BlockDetectionRange or BlockDetectionRange
+            SafeZoneAuto = data.SafeZoneAuto or SafeZoneAuto
+            SafeZoneHP = data.SafeZoneHP or SafeZoneHP
+            AdminCheckEnabled = data.AdminCheckEnabled or AdminCheckEnabled
+            PingDisplayEnabled = data.PingDisplayEnabled or PingDisplayEnabled
+            ServerPingDisplayEnabled = data.ServerPingDisplayEnabled or ServerPingDisplayEnabled
+            AliceGrabEnabled = data.AliceGrabEnabled or AliceGrabEnabled
+            PassesEnabled.OwnsAlicePass = data.OwnsAlicePass or PassesEnabled.OwnsAlicePass
+            PassesEnabled.HasVIP = data.HasVIP or PassesEnabled.HasVIP
+            PassesEnabled.HasSwap = data.HasSwap or PassesEnabled.HasSwap
+            currentMusicId = data.currentMusicId or currentMusicId
+        end
+    end
+end
+
+local function IsTeammate(player)
+    if player == LP then return true end
+    if not TeamCheckEnabled then return false end
+    if LP.Team and player.Team then return LP.Team == player.Team end
+    local char = player.Character
+    if char then
+        local students = workspace:FindFirstChild("Students")
+        local teachers = workspace:FindFirstChild("Teachers")
+        local myChar = LP.Character
+        if students and teachers and myChar then
+            if char:IsDescendantOf(students) and myChar:IsDescendantOf(students) then return true end
+            if char:IsDescendantOf(teachers) and myChar:IsDescendantOf(teachers) then return true end
+        end
+    end
+    return false
+end
+
+local function applyAliceGrab()
+    if not AliceGrabEnabled then return end
+    local targets = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character and not IsTeammate(p) then
+            table.insert(targets, p.Character)
+        end
+    end
+    local myChar = LP.Character
+    local myFolder = nil
+    if myChar then
+        if myChar:IsDescendantOf(workspace:FindFirstChild("Students") or workspace) then
+            myFolder = "Students"
+        elseif myChar:IsDescendantOf(workspace:FindFirstChild("Teachers") or workspace) then
+            myFolder = "Teachers"
+        end
+    end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj ~= LP.Character then
+            local hrp = obj:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local player = Players:GetPlayerFromCharacter(obj)
+                if not player then
+                    local targetFolder = nil
+                    if obj:IsDescendantOf(workspace:FindFirstChild("Students") or workspace) then
+                        targetFolder = "Students"
+                    elseif obj:IsDescendantOf(workspace:FindFirstChild("Teachers") or workspace) then
+                        targetFolder = "Teachers"
+                    end
+                    if myFolder and targetFolder and myFolder == targetFolder then
+                    else
+                        table.insert(targets, obj)
+                    end
+                end
+            end
+        end
+    end
+    for _, model in ipairs(targets) do
+        local root = model:FindFirstChild("HumanoidRootPart")
+        if root then
+            local hitbox = model:FindFirstChild("CustomAliceGrab")
+            if not hitbox then
+                hitbox = Instance.new("Part")
+                hitbox.Name = "CustomAliceGrab"
+                hitbox.CanCollide = false
+                hitbox.Transparency = 1
+                hitbox.Anchored = false
+                hitbox.Size = root.Size * ALICE_GRAB_SCALE
+                hitbox.CFrame = root.CFrame
+                hitbox.Parent = model
+                local weld = Instance.new("WeldConstraint")
+                weld.Part0 = hitbox
+                weld.Part1 = root
+                weld.Parent = hitbox
+            else
+                hitbox.Size = root.Size * ALICE_GRAB_SCALE
+            end
+        end
+    end
+end
+
+spawn(function()
+    while task.wait(0.5) do
+        if AliceGrabEnabled then
+            pcall(applyAliceGrab)
+        end
+    end
+end)
+
+local function toggleAliceGrab(on)
+    AliceGrabEnabled = on
+    if not on then
+        pcall(function()
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Part") and obj.Name == "CustomAliceGrab" then
+                    obj:Destroy()
+                end
+            end
+        end)
+    end
+    notify("爱丽丝抓取增大", on and "已开启" or "已关闭")
+end
+
+local function toggleTeamCheck(on)
+    TeamCheckEnabled = on
+    notify("队伍检测", on and "已开启（队友绿/敌人红）" or "已关闭（全部视为敌人）")
+    if ESPEnabled then refreshESP() end
+end
+
+local function toggleNightVision(on)
+    NightVisionEnabled = on
+    if on then
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        Lighting.Brightness = 3
+        notify("夜视", "已开启")
+    else
+        Lighting.Ambient = Color3.fromRGB(0, 0, 0)
+        Lighting.Brightness = 1
+        notify("夜视", "已关闭")
+    end
+end
+spawn(function()
+    while task.wait(1) do
+        if NightVisionEnabled then
+            pcall(function()
+                Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+                Lighting.Brightness = 3
+            end)
+        end
+    end
+end)
+
+-- ========== 透视系统（所有玩家可用，只含玩家名字和愤怒数字） ==========
+local espObjects = {}
+local function clearESP()
+    for _, data in pairs(espObjects) do
+        pcall(function() data.Highlight:Destroy() end)
+        pcall(function() data.Billboard:Destroy() end)
+    end
+    espObjects = {}
+end
+
+local function refreshESP()
+    if not ESPEnabled then return end
+    for player, data in pairs(espObjects) do
+        if not player.Parent or not player.Character then
+            pcall(function() data.Highlight:Destroy() end)
+            pcall(function() data.Billboard:Destroy() end)
+            espObjects[player] = nil
+        elseif data.Highlight.Adornee ~= player.Character then
+            pcall(function() data.Highlight:Destroy() end)
+            pcall(function() data.Billboard:Destroy() end)
+            espObjects[player] = nil
+        end
+    end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LP then continue end
+        local char = player.Character
+        if not char then continue end
+        local head = char:FindFirstChild("Head")
+        if not head then continue end
+
+        local isFriend = IsTeammate(player)
+        local color = isFriend and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
+        local label = player.Name
+
+        local enraged = char:GetAttribute("EnragedAmount")
+            or player:GetAttribute("EnragedAmount")
+        local hasEnraged = (enraged ~= nil)
+
+        if not espObjects[player] then
+            local hl = Instance.new("Highlight")
+            hl.FillColor = color
+            hl.OutlineColor = Color3.new(1,1,1)
+            hl.FillTransparency = 0.5
+            hl.Adornee = char
+            hl.Parent = char
+
+            local bill = Instance.new("BillboardGui")
+            bill.AlwaysOnTop = true
+            bill.Size = UDim2.new(0, 140, 0, 40)
+            bill.StudsOffset = Vector3.new(0, 2.8, 0)
+            bill.Adornee = head
+            bill.Parent = head
+
+            local txt = Instance.new("TextLabel", bill)
+            txt.BackgroundTransparency = 1
+            txt.Text = label
+            txt.TextColor3 = Color3.new(1,1,1)
+            txt.Font = Enum.Font.SourceSansBold
+            txt.TextSize = 14
+            txt.Size = UDim2.new(1, 0, 0, 18)
+            txt.Position = UDim2.new(0, 0, 0, 0)
+
+            local rageText = Instance.new("TextLabel", bill)
+            rageText.Name = "RageText"
+            rageText.BackgroundTransparency = 1
+            rageText.TextColor3 = Color3.fromRGB(255, 80, 80)
+            rageText.Font = Enum.Font.SourceSansBold
+            rageText.TextSize = 12
+            rageText.Size = UDim2.new(1, 0, 0, 16)
+            rageText.Position = UDim2.new(0, 0, 0, 20)
+
+            local data = {
+                Highlight = hl,
+                Billboard = bill,
+                TextLabel = txt,
+                RageText = rageText
+            }
+            espObjects[player] = data
+        else
+            local data = espObjects[player]
+            data.Highlight.FillColor = color
+            data.TextLabel.Text = label
+            data.TextLabel.TextColor3 = Color3.new(1,1,1)
+        end
+
+        local data = espObjects[player]
+        if data then
+            if hasEnraged then
+                data.RageText.Visible = true
+                data.RageText.Text = "愤怒: " .. tostring(enraged)
+            else
+                data.RageText.Visible = false
+            end
+        end
+    end
+end
+
+spawn(function() while task.wait(0.1) do pcall(refreshESP) end end)
+local function onCharacterAdded(player) pcall(refreshESP) end
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LP then player.CharacterAdded:Connect(function() onCharacterAdded(player) end) end
+end
+Players.PlayerAdded:Connect(function(player) player.CharacterAdded:Connect(function() onCharacterAdded(player) end) end)
+LP.CharacterAdded:Connect(function() pcall(refreshESP) end)
+
+local function toggleESP(on)
+    ESPEnabled = on
+    if on then
+        refreshESP()
+        notify("透视", "已开启（0.1秒刷新，含愤怒数字）")
+    else
+        clearESP()
+        notify("透视", "已关闭")
+    end
+end
+
+-- ========== 球棒攻击范围 ==========
+spawn(function()
+    while task.wait(0.3) do
+        if BatRangeEnabled then
+            local tool = LP.Character and LP.Character:FindFirstChild("Bat")
+            if not tool then tool = LP.Backpack:FindFirstChild("Bat") end
+            if tool then
+                pcall(function() tool:SetAttribute("HitboxSize", Vector3.new(BatRangeValue, BatRangeValue, BatRangeValue)) end)
+                local hitboxVal = tool:FindFirstChild("HitboxSize")
+                if hitboxVal and hitboxVal:IsA("Vector3Value") then hitboxVal.Value = Vector3.new(BatRangeValue, BatRangeValue, BatRangeValue) end
+            end
+        end
+    end
+end)
+
+-- ========== 自动格挡 ==========
+local function checkSoundPlaying(sound)
+    if not sound then return false end
+    if sound:IsA("Sound") then
+        if sound.IsLoaded and sound.TimeLength > 0 then return sound.TimePosition > 0 and sound.TimePosition < sound.TimeLength end
+        return sound.Playing
+    end
+    return false
+end
+local function isTeacherAttacking(teacher)
+    local humanoid = teacher:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+        if track.Animation then
+            local id = track.Animation.AnimationId:match("%d+")
+            if id then
+                for _, attackId in ipairs(teacherAttackAnimIDs) do
+                    if tonumber(id) == attackId then return true end
+                end
+            end
+        end
+    end
+    return false
+end
+local function pressBlockKey()
+    local currentTime = tick()
+    if currentTime - LastBlockTime < BLOCK_COOLDOWN then return end
+    LastBlockTime = currentTime
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+end
+local function checkForAttack()
+    local character = LP.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    local myPosition = character.HumanoidRootPart.Position
+    local teachersFolder = workspace:FindFirstChild("Teachers")
+    if not teachersFolder then return end
+    for _, teacher in pairs(teachersFolder:GetChildren()) do
+        if teacher:IsA("Model") then
+            local teacherRoot = teacher:FindFirstChild("HumanoidRootPart")
+            if teacherRoot then
+                local distance = (teacherRoot.Position - myPosition).Magnitude
+                if distance > BlockDetectionRange then continue end
+                for _, sound in pairs(teacher:GetDescendants()) do
+                    if sound.Name == "SwingSFX" and checkSoundPlaying(sound) then
+                        pressBlockKey(); return
+                    end
+                end
+                if isTeacherAttacking(teacher) then pressBlockKey(); return end
+            end
+        end
+    end
+end
+local function startBlockLoop()
+    if BlockConnection then BlockConnection:Disconnect() end
+    BlockConnection = RunService.Heartbeat:Connect(function()
+        if AutoBlockEnabled then checkForAttack() end
+    end)
+end
+local function toggleAutoBlock(on)
+    AutoBlockEnabled = on
+    if on then startBlockLoop()
+    else if BlockConnection then BlockConnection:Disconnect(); BlockConnection = nil end end
+    notify("自动格挡", on and "已开启" or "已关闭")
+end
+
+-- ========== 安全区传送 ==========
+local function doSafeZoneTeleport()
+    if isTeleportingSafezone then return end
+    isTeleportingSafezone = true
+    notify("安全区传送")
+    spawn(function()
+        local startTime = tick()
+        while tick() - startTime < 2 do
+            local char = LP.Character
+            if char then
+                local hrp = char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local dist = (hrp.Position - SAFE_POSITION).Magnitude
+                    if dist < SAFE_ARRIVE_DISTANCE then break end
+                    pcall(function() hrp.CFrame = CFrame.new(SAFE_POSITION) end)
+                end
+            end
+            task.wait(0.1)
+        end
+        isTeleportingSafezone = false
+        notify("传送完成")
+    end)
+end
+spawn(function()
+    while task.wait(0.2) do
+        if not SafeZoneAuto then LastHealthOnTrigger = nil; continue end
+        if isTeleportingSafezone then continue end
+        local char = LP.Character
+        if not char then LastHealthOnTrigger = nil; continue end
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid then LastHealthOnTrigger = nil; continue end
+        local currentHealth = humanoid.Health
+        if currentHealth > SafeZoneHP then LastHealthOnTrigger = nil; continue end
+        if LastHealthOnTrigger and currentHealth >= LastHealthOnTrigger then continue end
+        local now = tick()
+        if now - LastTeleportTime < TELEPORT_COOLDOWN then continue end
+        LastHealthOnTrigger = currentHealth
+        LastTeleportTime = now
+        doSafeZoneTeleport()
+    end
+end)
+
+-- ========== 应用设置 ==========
+local function applyAllSettings()
+    local char = LP.Character
+    if char then
+        if MaxStaminaEnabled then pcall(function() char:SetAttribute("MaxStamina", MaxStaminaValue) end) end
+        if StaminaRecoveryEnabled then pcall(function() char:SetAttribute("Stamina", StaminaRecoveryValue) end) end
+    end
+    for attrName, enabled in pairs(PassesEnabled) do
+        if enabled then pcall(function() LP:SetAttribute(attrName, true) end) end
+    end
+end
+LP.CharacterAdded:Connect(function() task.wait(0.1); applyAllSettings() end)
+spawn(function() while task.wait(0.5) do applyAllSettings() end end)
+
+-- ========== 功能控制 ==========
+local function toggleMaxStamina(on)
+    MaxStaminaEnabled = on
+    if not on then pcall(function() local char = LP.Character; if char then char:SetAttribute("MaxStamina", 100) end end) end
+    applyAllSettings()
+    notify("最大体力", on and "已开启" or "已关闭")
+end
+local function setMaxStamina(val) MaxStaminaValue = tonumber(val) or MaxStaminaValue; if MaxStaminaEnabled then applyAllSettings() end end
+local function toggleStaminaRecovery(on)
+    StaminaRecoveryEnabled = on; applyAllSettings()
+    notify("体力恢复", on and "已开启" or "已关闭")
+end
+local function setStaminaRecovery(val) StaminaRecoveryValue = tonumber(val) or StaminaRecoveryValue; if StaminaRecoveryEnabled then applyAllSettings() end end
+local function getPass(name, attrName) PassesEnabled[attrName] = true; applyAllSettings(); notify("通行证", "已获取: " .. name) end
+local function toggleBatRange(on) BatRangeEnabled = on; notify("球棒范围", on and "已开启" or "已关闭") end
+local function setBatRange(val) BatRangeValue = tonumber(val) or BatRangeValue end
+
+-- ========== 传送 ==========
+local function teleport(x, y, z)
+    local char = LP.Character
+    if not char then notify("传送失败", "未找到角色"); return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then notify("传送失败", "未找到 HumanoidRootPart"); return end
+    pcall(function() hrp.CFrame = CFrame.new(x, y, z) end)
+    notify("传送", "已到达")
+end
+
+-- ========== 门删除 ==========
+local function deleteElectricRoomDoor()
+    local doors = workspace:FindFirstChild("Area")
+    if doors then doors = doors:FindFirstChild("Map") end
+    if doors then doors = doors:FindFirstChild("Doors") end
+    if not doors then notify("删除失败", "未找到 Doors"); return end
+    local deletedCount = 0
+    for _, child in ipairs(doors:GetChildren()) do
+        if child:FindFirstChild("Mesh") then
+            pcall(function() child:Destroy() end)
+            deletedCount = deletedCount + 1
+        end
+    end
+    notify("电立室门删除", deletedCount > 0 and "所有电力室门已删除" or "未找到包含 Mesh 的门")
+end
+local function deleteSkinShop()
+    local map = workspace:FindFirstChild("Area")
+    if map then map = map:FindFirstChild("Map") end
+    if not map then notify("皮肤商店删除", "未找到 Area/Map"); return end
+    local skinShop = map:FindFirstChild("SkinSelectionShop")
+    if skinShop then
+        pcall(function() skinShop:FindFirstChild("BaseLocker"):Destroy() end)
+        pcall(function() skinShop:FindFirstChild("Shelf"):Destroy() end)
+    end
+    local doors = map:FindFirstChild("Doors")
+    if doors then
+        local storageDoor = doors:FindFirstChild("StorageDoor")
+        if storageDoor then
+            pcall(function() storageDoor:FindFirstChild("DoubleDoor2"):Destroy() end)
+            pcall(function() storageDoor:FindFirstChild("DoubleDoor"):Destroy() end)
+        end
+    end
+    local collisions = map:FindFirstChild("CollisionBoxes")
+    if collisions then pcall(function() collisions:FindFirstChild("StorageDoorCollision"):Destroy() end) end
+    notify("皮肤商店删除", "已删除所有皮肤商店相关对象")
+end
+
+-- ========== 管理员检测 ==========
+spawn(function()
+    while task.wait(1) do
+        if AdminCheckEnabled then
+            pcall(function()
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player ~= LP and (string.lower(player.Name) == "sourpatchsyd_38" or string.lower(player.DisplayName) == "sourpatchsyd_38") then
+                        StarterGui:SetCore("SendNotification", {
+                            Title = "警告",
+                            Text = "检测到管理员在线，正在离开服务器...",
+                            Duration = 3,
+                            Icon = "rbxassetid://859387452"
+                        })
+                        task.wait(0.5)
+                        LP:Kick("检测到管理员，自动离开服务器")
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ==================== 第二部分结束 ====================
+-- ==================== 第三部分开始：GUI 构建、延迟显示、音乐播放器、保存/删除 ====================
+
+local guiParent = LP:WaitForChild("PlayerGui")
+local gui = Instance.new("ScreenGui", guiParent)
+gui.Name = "FPES_Final"; gui.ResetOnSpawn = false
+
+local main = Instance.new("Frame", gui)
+main.Position = UDim2.new(0.5, -140, 0.45, -190)
+main.BackgroundColor3 = C.Bg; main.BorderSizePixel = 0; main.Active = true
+main.Size = UDim2.new(0, 0, 0, 0)
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+
+local mainTargetSize = UDim2.new(0, 280, 0, 380)
+local mainTween = TweenService:Create(main, TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = mainTargetSize})
+mainTween:Play()
+
+local tb = Instance.new("Frame", main)
+tb.Size = UDim2.new(1, 0, 0, 36); tb.BackgroundColor3 = C.Bg2; tb.BorderSizePixel = 0; tb.Active = true
+Instance.new("UICorner", tb).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel", tb)
+title.Text = "FPE:S  |  作者: jgft616  |  小号: sakfjje"
+title.Font = Enum.Font.GothamBold; title.TextSize = 13
+title.TextColor3 = C.Text; title.BackgroundTransparency = 1
+title.Position = UDim2.new(0, 12, 0, 0); title.Size = UDim2.new(1, -70, 1, 0); title.TextXAlignment = 0
+
+local userLabel = Instance.new("TextLabel", tb)
+userLabel.Text = UserName
+userLabel.Font = Enum.Font.Gotham; userLabel.TextSize = 9; userLabel.TextColor3 = C.Gray
+userLabel.BackgroundTransparency = 1
+userLabel.Position = UDim2.new(0, 12, 0, 22); userLabel.Size = UDim2.new(0, 100, 0, 12); userLabel.TextXAlignment = 0
+
+local minBtn = Instance.new("TextButton", tb)
+minBtn.Size = UDim2.new(0, 30, 0, 30); minBtn.Position = UDim2.new(1, -62, 0, 3); minBtn.Text = "–"
+minBtn.Font = Enum.Font.GothamBold; minBtn.TextSize = 22; minBtn.TextColor3 = C.Text
+minBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60); minBtn.BorderSizePixel = 0
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 5)
+
+local closeBtn = Instance.new("TextButton", tb)
+closeBtn.Size = UDim2.new(0, 30, 0, 30); closeBtn.Position = UDim2.new(1, -30, 0, 3); closeBtn.Text = "✕"
+closeBtn.Font = Enum.Font.GothamBold; closeBtn.TextSize = 16; closeBtn.TextColor3 = C.Red
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60); closeBtn.BorderSizePixel = 0
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+
+local miniDot = Instance.new("TextButton", gui)
+miniDot.Size = UDim2.new(0, 40, 0, 40); miniDot.Position = UDim2.new(0, 10, 0, 10)
+miniDot.BackgroundColor3 = C.Acc; miniDot.Text = "⚙️"; miniDot.Font = Enum.Font.GothamBold; miniDot.TextSize = 20
+miniDot.TextColor3 = Color3.fromRGB(255, 255, 255); miniDot.Visible = false
+Instance.new("UICorner", miniDot).CornerRadius = UDim.new(1, 0)
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function() minimized = true; main.Visible = false; miniDot.Visible = true end)
+miniDot.MouseButton1Click:Connect(function() minimized = false; main.Visible = true; miniDot.Visible = false end)
+closeBtn.MouseButton1Click:Connect(function()
+    MaxStaminaEnabled = false; StaminaRecoveryEnabled = false
+    pcall(function() local char = LP.Character; if char then char:SetAttribute("MaxStamina", 100) end end)
+    for k in pairs(PassesEnabled) do PassesEnabled[k] = false end
+    ESPEnabled = false; clearESP()
+    if NightVisionEnabled then toggleNightVision(false) end
+    BatRangeEnabled = false
+    AutoBlockEnabled = false
+    SafeZoneAuto = false
+    AdminCheckEnabled = false
+    PingDisplayEnabled = false
+    ServerPingDisplayEnabled = false
+    AliceGrabEnabled = false
+    pcall(function()
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Part") and obj.Name == "CustomAliceGrab" then
+                obj:Destroy()
+            end
+        end
+    end)
+    if BlockConnection then BlockConnection:Disconnect() end
+    applyAllSettings(); gui:Destroy()
+end)
+
+local scroll = Instance.new("ScrollingFrame", main)
+scroll.Size = UDim2.new(1, -8, 1, -42); scroll.Position = UDim2.new(0, 4, 0, 40)
+scroll.BackgroundTransparency = 1; scroll.ScrollBarThickness = 6; scroll.ScrollBarImageColor3 = C.Acc
+scroll.BorderSizePixel = 0
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+
+local listLayout = Instance.new("UIListLayout", scroll)
+listLayout.Padding = UDim.new(0, 2)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function updateCanvas()
+    local totalHeight = 0
+    local visibleCount = 0
+    for _, child in ipairs(scroll:GetChildren()) do
+        if child:IsA("GuiObject") and child.Visible then
+            totalHeight = totalHeight + child.AbsoluteSize.Y
+            visibleCount = visibleCount + 1
+        end
+    end
+    if visibleCount > 1 then
+        totalHeight = totalHeight + listLayout.Padding.Offset * (visibleCount - 1)
+    end
+    scroll.CanvasSize = UDim2.new(0, 0, 0, totalHeight + 8)
+end
+
+local function addLabel(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 16); lbl.BackgroundTransparency = 1
+    lbl.Text = text; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 11
+    lbl.TextColor3 = C.Acc; lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = scroll; updateCanvas()
+end
+
+local function addToggleWithInput(labelText, defaultVal, initial, toggleCallback, inputCallback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 22); frame.BackgroundTransparency = 1; frame.Parent = scroll
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 10
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0, 90, 1, 0); label.TextXAlignment = 0
+    local input = Instance.new("TextBox", frame)
+    input.Size = UDim2.new(1, -140, 0, 18); input.Position = UDim2.new(0, 92, 0, 2)
+    input.BackgroundColor3 = C.Bg2; input.Text = tostring(defaultVal)
+    input.Font = Enum.Font.Gotham; input.TextSize = 10; input.TextColor3 = C.Text
+    input.PlaceholderColor3 = C.Gray; input.ClearTextOnFocus = false; input.TextXAlignment = 0
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 4)
+    local switch = Instance.new("TextButton", frame)
+    switch.Size = UDim2.new(0, 34, 0, 16); switch.Position = UDim2.new(1, -38, 0.5, -8)
+    switch.BackgroundColor3 = initial and C.Green or C.Gray; switch.Text = ""; switch.AutoButtonColor = false
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch)
+    knob.Size = UDim2.new(0, 12, 0, 12)
+    knob.Position = initial and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local state = initial
+    switch.MouseButton1Click:Connect(function()
+        state = not state
+        switch.BackgroundColor3 = state and C.Green or C.Gray
+        knob.Position = state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6)
+        if toggleCallback then toggleCallback(state) end
+        if state and inputCallback then inputCallback(input.Text) end
+    end)
+    input:GetPropertyChangedSignal("Text"):Connect(function()
+        if state and inputCallback then inputCallback(input.Text) end
+    end)
+    updateCanvas()
+end
+
+local function addToggle(labelText, initial, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 22); frame.BackgroundTransparency = 1; frame.Parent = scroll
+    local label = Instance.new("TextLabel", frame)
+    label.Text = labelText; label.Font = Enum.Font.Gotham; label.TextSize = 11
+    label.TextColor3 = C.Text; label.BackgroundTransparency = 1
+    label.Size = UDim2.new(0, 135, 1, 0); label.TextXAlignment = 0
+    local switch = Instance.new("TextButton", frame)
+    switch.Size = UDim2.new(0, 36, 0, 18); switch.Position = UDim2.new(1, -40, 0.5, -9)
+    switch.BackgroundColor3 = initial and C.Green or C.Gray; switch.Text = ""; switch.AutoButtonColor = false
+    Instance.new("UICorner", switch).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame", switch)
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Position = initial and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+    knob.BackgroundColor3 = Color3.fromRGB(255,255,255)
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local state = initial
+    switch.MouseButton1Click:Connect(function()
+        state = not state
+        switch.BackgroundColor3 = state and C.Green or C.Gray
+        knob.Position = state and UDim2.new(1, -16, 0.5, -7) or UDim2.new(0, 2, 0.5, -7)
+        if callback then callback(state) end
+    end)
+    updateCanvas()
+end
+
+local function addButton(text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 26); btn.BackgroundColor3 = C.Acc
+    btn.Text = text; btn.Font = Enum.Font.GothamBold; btn.TextSize = 11; btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.AutoButtonColor = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.MouseButton1Click:Connect(function()
+        btn.BackgroundColor3 = C.Green; btn.Text = "✅ " .. text; callback()
+        task.wait(1.5); btn.BackgroundColor3 = C.Acc; btn.Text = text
+    end)
+    btn.Parent = scroll; updateCanvas()
+end
+
+-- ====== 构建分组 ======
+addLabel("体力")
+addToggleWithInput("最大体力", MaxStaminaValue, MaxStaminaEnabled, toggleMaxStamina, setMaxStamina)
+addToggleWithInput("体力恢复", StaminaRecoveryValue, StaminaRecoveryEnabled, toggleStaminaRecovery, setStaminaRecovery)
+
+addLabel("视觉")
+addToggle("透视开关", ESPEnabled, toggleESP)
+addToggle("队伍检测", TeamCheckEnabled, toggleTeamCheck)
+addToggle("夜视", NightVisionEnabled, toggleNightVision)
+
+-- ========== 延迟显示（公共功能） ==========
+addLabel("延迟显示")
+
+addToggle("显示延迟", PingDisplayEnabled, function(on)
+    PingDisplayEnabled = on
+    if on then
+        spawn(function()
+            local pingGui = Instance.new("ScreenGui")
+            pingGui.Name = "PingDisplay"
+            pingGui.Parent = LP:WaitForChild("PlayerGui")
+            pingGui.ResetOnSpawn = false
+            pingGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+            local pingLabel = Instance.new("TextLabel", pingGui)
+            pingLabel.Size = UDim2.new(0, 100, 0, 20)
+            pingLabel.Position = UDim2.new(0, 10, 0, 10)
+            pingLabel.BackgroundTransparency = 1
+            pingLabel.Font = Enum.Font.GothamBold
+            pingLabel.TextSize = 14
+            pingLabel.TextStrokeTransparency = 0
+            pingLabel.Text = "Ping: --"
+
+            while PingDisplayEnabled do
+                local ping = math.floor(LP:GetNetworkPing() * 1000)
+                pingLabel.Text = "Ping: " .. ping .. "ms"
+                if ping < 80 then
+                    pingLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                elseif ping <= 150 then
+                    pingLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+                else
+                    pingLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                end
+                task.wait(0.1)
+            end
+            pingGui:Destroy()
+        end)
+        notify("延迟显示", "已开启")
+    else
+        notify("延迟显示", "已关闭")
+    end
+end)
+
+addToggle("服务器延迟检测", ServerPingDisplayEnabled, function(on)
+    ServerPingDisplayEnabled = on
+    if on then
+        spawn(function()
+            local srvGui = Instance.new("ScreenGui")
+            srvGui.Name = "ServerPingDisplay"
+            srvGui.Parent = LP:WaitForChild("PlayerGui")
+            srvGui.ResetOnSpawn = false
+            srvGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+            local srvLabel = Instance.new("TextLabel", srvGui)
+            srvLabel.Size = UDim2.new(0, 240, 0, 20)
+            local yPos = PingDisplayEnabled and 35 or 10
+            srvLabel.Position = UDim2.new(0, 10, 0, yPos)
+            srvLabel.BackgroundTransparency = 1
+            srvLabel.Font = Enum.Font.GothamBold
+            srvLabel.TextSize = 14
+            srvLabel.TextStrokeTransparency = 0
+            srvLabel.Text = "检测中..."
+
+            local samples = 10
+            local pingHistory = {}
+
+            while ServerPingDisplayEnabled do
+                local ping = math.floor(LP:GetNetworkPing() * 1000)
+                table.insert(pingHistory, ping)
+                if #pingHistory > samples then table.remove(pingHistory, 1) end
+
+                local minPing, maxPing, sumPing = math.huge, -1, 0
+                for _, p in ipairs(pingHistory) do
+                    minPing = math.min(minPing, p)
+                    maxPing = math.max(maxPing, p)
+                    sumPing = sumPing + p
+                end
+                local avgPing = math.floor(sumPing / #pingHistory)
+                srvLabel.Text = string.format("平均:%dms | 最低:%dms | 最高:%dms", avgPing, minPing, maxPing)
+
+                if avgPing < 80 then
+                    srvLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                elseif avgPing <= 150 then
+                    srvLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+                else
+                    srvLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+                end
+
+                task.wait(0.1)
+            end
+            srvGui:Destroy()
+        end)
+        notify("服务器延迟检测", "已开启")
+    else
+        notify("服务器延迟检测", "已关闭")
+    end
+end)
+
+-- ========== 音乐播放器（仅白名单可见） ==========
+if _G.IsWhitelisted then
+    addLabel("音乐")
+
+    local musicList = {
+        { id = "rbxassetid://82696338249251", name = "横冲直撞" },
+        { id = "rbxassetid://79277371759525", name = "雨爱" },
+        { id = "rbxassetid://88523902860927", name = "Unhappy" },
+        { id = "rbxassetid://110919391228823", name = "低皮质醇" },
+        { id = "rbxassetid://84699699565612", name = "小时候只有妈妈熬油" },
+        { id = "rbxassetid://76421239273915", name = "海屿你原版" },
+        { id = "rbxassetid://104449595639237", name = "呼啸骑士第三章战斗曲" },
+        { id = "rbxassetid://136208016606825", name = "爱之列车" },
+        { id = "rbxassetid://85373130121712", name = "告白气球" },
+    }
+
+    local currentSound = nil
+
+    local musicListBtn = Instance.new("TextButton")
+    musicListBtn.Size = UDim2.new(1, 0, 0, 26)
+    musicListBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
+    musicListBtn.Text = "选择音乐"
+    musicListBtn.Font = Enum.Font.GothamBold
+    musicListBtn.TextSize = 11
+    musicListBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    musicListBtn.AutoButtonColor = false
+    Instance.new("UICorner", musicListBtn).CornerRadius = UDim.new(0, 6)
+    musicListBtn.Parent = scroll
+    updateCanvas()
+
+    if currentMusicId then
+        for _, music in ipairs(musicList) do
+            if music.id == currentMusicId then
+                musicListBtn.Text = "当前: " .. music.name
+                break
+            end
+        end
+    end
+
+    local musicDropdown = Instance.new("Frame")
+    musicDropdown.Size = UDim2.new(1, 0, 0, 0)
+    musicDropdown.BackgroundTransparency = 1
+    musicDropdown.Visible = false
+    musicDropdown.Parent = scroll
+
+    local musicDropdownLayout = Instance.new("UIListLayout", musicDropdown)
+    musicDropdownLayout.Padding = UDim.new(0, 2)
+
+    local musicDropdownOpen = false
+
+    musicListBtn.MouseButton1Click:Connect(function()
+        musicDropdownOpen = not musicDropdownOpen
+        musicDropdown.Visible = musicDropdownOpen
+        if musicDropdownOpen then
+            musicDropdown.Size = UDim2.new(1, 0, 0, #musicList * 26 + (#musicList - 1) * 2)
+        else
+            musicDropdown.Size = UDim2.new(1, 0, 0, 0)
+        end
+        updateCanvas()
+    end)
+
+    for _, music in ipairs(musicList) do
+        local option = Instance.new("TextButton")
+        option.Size = UDim2.new(1, 0, 0, 26)
+        option.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+        option.Text = music.name
+        option.Font = Enum.Font.Gotham
+        option.TextSize = 10
+        option.TextColor3 = Color3.fromRGB(255, 255, 255)
+        option.AutoButtonColor = false
+        Instance.new("UICorner", option).CornerRadius = UDim.new(0, 4)
+        option.Parent = musicDropdown
+
+        option.MouseButton1Click:Connect(function()
+            currentMusicId = music.id
+            musicListBtn.Text = "当前: " .. music.name
+            musicDropdownOpen = false
+            musicDropdown.Visible = false
+            musicDropdown.Size = UDim2.new(1, 0, 0, 0)
+            updateCanvas()
+        end)
+    end
+
+    local playBtn = Instance.new("TextButton")
+    playBtn.Size = UDim2.new(1, 0, 0, 26)
+    playBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
+    playBtn.Text = "播放音乐"
+    playBtn.Font = Enum.Font.GothamBold
+    playBtn.TextSize = 11
+    playBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    playBtn.AutoButtonColor = false
+    Instance.new("UICorner", playBtn).CornerRadius = UDim.new(0, 6)
+    playBtn.Parent = scroll
+    updateCanvas()
+
+    playBtn.MouseButton1Click:Connect(function()
+        if not currentMusicId then
+            notify("音乐", "请先选择音乐")
+            return
+        end
+        if currentSound then
+            currentSound:Stop()
+            currentSound:Destroy()
+            currentSound = nil
+        end
+        currentSound = Instance.new("Sound")
+        currentSound.SoundId = currentMusicId
+        currentSound.Volume = 1
+        currentSound.Parent = LP:WaitForChild("PlayerGui")
+        currentSound:Play()
+        notify("音乐", "正在播放")
+    end)
+
+    local stopBtn = Instance.new("TextButton")
+    stopBtn.Size = UDim2.new(1, 0, 0, 26)
+    stopBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    stopBtn.Text = "停止音乐"
+    stopBtn.Font = Enum.Font.GothamBold
+    stopBtn.TextSize = 11
+    stopBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    stopBtn.AutoButtonColor = false
+    Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 6)
+    stopBtn.Parent = scroll
+    updateCanvas()
+
+    stopBtn.MouseButton1Click:Connect(function()
+        if currentSound then
+            currentSound:Stop()
+            currentSound:Destroy()
+            currentSound = nil
+            notify("音乐", "已停止")
+        end
+    end)
+end
+
+-- ====== 通行证 ======
+addLabel("通行证")
+addButton("获取爱丽丝通行证", function() getPass("爱丽丝通行证", "OwnsAlicePass") end)
+addButton("获取 VIP", function() getPass("VIP", "HasVIP") end)
+addButton("获取交换通行证", function() getPass("交换通行证", "HasSwap") end)
+
+-- ====== 攻击 ======
+addLabel("攻击")
+addToggleWithInput("球棒范围", BatRangeValue, BatRangeEnabled, toggleBatRange, setBatRange)
+local warningLabel = Instance.new("TextLabel")
+warningLabel.Size = UDim2.new(1, 0, 0, 14); warningLabel.BackgroundTransparency = 1
+warningLabel.Text = "球棒攻击范围不要调太大要不然攻击不到"
+warningLabel.Font = Enum.Font.Gotham; warningLabel.TextSize = 9; warningLabel.TextColor3 = C.Gray
+warningLabel.TextXAlignment = Enum.TextXAlignment.Left
+warningLabel.Parent = scroll; updateCanvas()
+
+-- ====== 防御 ======
+addLabel("防御")
+addToggleWithInput("自动格挡", BlockDetectionRange, AutoBlockEnabled, toggleAutoBlock, function(val)
+    local num = tonumber(val)
+    if num and num > 0 then BlockDetectionRange = num end
+end)
+local blockBugLabel = Instance.new("TextLabel")
+blockBugLabel.Size = UDim2.new(1, 0, 0, 28); blockBugLabel.BackgroundTransparency = 1
+blockBugLabel.Text = "⚠ 格挡有一小点bug：格挡时会有一瞬间的动不了，如果你的延迟太高也可能格挡不到"
+blockBugLabel.Font = Enum.Font.Gotham
+blockBugLabel.TextSize = 9
+blockBugLabel.TextColor3 = C.Gray
+blockBugLabel.TextWrapped = true
+blockBugLabel.TextXAlignment = Enum.TextXAlignment.Left
+blockBugLabel.Parent = scroll
+updateCanvas()
+
+-- 管理员检测开关
+addToggle("管理员检测", AdminCheckEnabled, function(on)
+    AdminCheckEnabled = on
+    notify("管理员检测", on and "已开启" or "已关闭")
+end)
+
+-- ====== 爱丽丝抓取增大（仅白名单可见） ======
+if _G.IsWhitelisted then
+    addLabel("爱丽丝")
+    addToggle("爱丽丝抓取增大", AliceGrabEnabled, toggleAliceGrab)
+end
+
+-- ====== 传送 ======
+addLabel("传送")
+addToggleWithInput("安全区传送(血量闸)", SafeZoneHP, SafeZoneAuto, function(on)
+    SafeZoneAuto = on
+    notify("安全区传送", on and "已开启（需受伤触发）" or "已关闭")
+end, function(val)
+    local num = tonumber(val)
+    if num and num >= 0 and num <= 100 then
+        SafeZoneHP = num
+    end
+end)
+
+local listExpanded = false
+local listToggle = Instance.new("TextButton")
+listToggle.Size = UDim2.new(1, 0, 0, 20); listToggle.BackgroundColor3 = C.Bg2
+listToggle.Font = Enum.Font.GothamBold; listToggle.TextSize = 10; listToggle.TextColor3 = C.Text
+listToggle.Text = "▶ 选择地点"; listToggle.AutoButtonColor = false
+Instance.new("UICorner", listToggle).CornerRadius = UDim.new(0, 4); listToggle.Parent = scroll
+
+local listContent = Instance.new("Frame")
+listContent.BackgroundTransparency = 1; listContent.Size = UDim2.new(1, 0, 0, 0); listContent.Visible = false
+listContent.Parent = scroll
+
+local teleListFrame = Instance.new("Frame", listContent)
+teleListFrame.Size = UDim2.new(1, 0, 0, 100); teleListFrame.BackgroundColor3 = Color3.fromRGB(35,35,45); teleListFrame.BorderSizePixel = 0
+Instance.new("UICorner", teleListFrame).CornerRadius = UDim.new(0, 6)
+
+local teleScroll = Instance.new("ScrollingFrame", teleListFrame)
+teleScroll.Size = UDim2.new(1, -4, 1, -4); teleScroll.Position = UDim2.new(0, 2, 0, 2)
+teleScroll.BackgroundTransparency = 1; teleScroll.ScrollBarThickness = 4
+teleScroll.ScrollBarImageColor3 = C.Acc; teleScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+teleScroll.BorderSizePixel = 0
+
+local teleScrollLayout = Instance.new("UIListLayout", teleScroll)
+teleScrollLayout.Padding = UDim.new(0, 1); teleScrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local teleButtons = {}
+local selectedCoords, selectedName = nil, ""
+
+local function collapseTeleport()
+    if listExpanded then
+        listExpanded = false; listContent.Visible = false; listContent.Size = UDim2.new(1, 0, 0, 0)
+        listToggle.Text = selectedName or "▶ 选择地点"
+        updateCanvas()
+    end
+end
+
+local telePoints = {
+    { name = "不知名教室", x = -336.05, y = 104.10, z = 385.26 },
+    { name = "数学老师教室", x = -284.62, y = 104.10, z = 386.15 },
+    { name = "物理老师教室", x = -176.89, y = 104.10, z = 386.20 },
+    { name = "语文老师教室", x = -150.14, y = 107.33, z = 386.77 },
+    { name = "大厅", x = -205.56, y = 104.10, z = 215.44 },
+    { name = "室外", x = -213.53, y = 104.10, z = 141.15 },
+    { name = "食堂", x = -334.64, y = 106.82, z = 169.27 },
+    { name = "皮肤商店", x = -310.66, y = 104.10, z = 287.00 },
+    { name = "游泳馆", x = -269.57, y = 104.10, z = 35.32 },
+    { name = "篮球场", x = -206.52, y = 104.15, z = -32.19 },
+    { name = "二楼电力室", x = -163.99, y = 118.95, z = 262.55 },
+    { name = "二楼楼梯下电力室", x = -287.89, y = 118.95, z = 139.19 },
+    { name = "篮球场旁边电力室", x = -244.22, y = 105.15, z = -95.36 },
+    { name = "爱丽丝旁边电力室", x = -307.46, y = 105.15, z = 328.19 },
+}
+
+for _, tp in ipairs(telePoints) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 18); btn.BackgroundColor3 = C.Acc; btn.Font = Enum.Font.Gotham; btn.TextSize = 10
+    btn.TextColor3 = Color3.fromRGB(255,255,255); btn.Text = tp.name; btn.AutoButtonColor = false
+    btn.Parent = teleScroll; teleButtons[btn] = tp
+
+    btn.MouseButton1Click:Connect(function()
+        for b, _ in pairs(teleButtons) do b.BackgroundColor3 = C.Acc end
+        btn.BackgroundColor3 = C.Green
+        selectedCoords = Vector3.new(tp.x, tp.y, tp.z)
+        selectedName = tp.name
+        if selectedLabel then selectedLabel.Text = "已选择: " .. selectedName end
+        collapseTeleport()
+    end)
+end
+
+local teleBtn = Instance.new("TextButton")
+teleBtn.Size = UDim2.new(1, 0, 0, 26); teleBtn.BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+teleBtn.Text = "传送"; teleBtn.Font = Enum.Font.GothamBold; teleBtn.TextSize = 11; teleBtn.TextColor3 = Color3.fromRGB(255,255,255)
+Instance.new("UICorner", teleBtn).CornerRadius = UDim.new(0, 6); teleBtn.Parent = scroll
+
+teleBtn.MouseButton1Click:Connect(function()
+    if selectedCoords then teleport(selectedCoords.X, selectedCoords.Y, selectedCoords.Z)
+    else notify("未选择", "请先选择一个传送点") end
+end)
+
+local selectedLabel = Instance.new("TextLabel")
+selectedLabel.Size = UDim2.new(1, 0, 0, 12); selectedLabel.BackgroundTransparency = 1; selectedLabel.Font = Enum.Font.Gotham; selectedLabel.TextSize = 10
+selectedLabel.TextColor3 = C.Gray; selectedLabel.Text = "未选择"; selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.Parent = scroll
+
+listToggle.MouseButton1Click:Connect(function()
+    listExpanded = not listExpanded
+    if listExpanded then
+        listContent.Visible = true; listContent.Size = UDim2.new(1, 0, 0, teleListFrame.Size.Y.Offset)
+        listToggle.Text = selectedName and "▼ " .. selectedName or "▼ 选择地点"
+    else
+        listToggle.Text = selectedName or "▶ 选择地点"
+        listContent.Visible = false; listContent.Size = UDim2.new(1, 0, 0, 0)
+    end
+    updateCanvas()
+end)
+
+-- ====== 删除 ======
+addLabel("删除")
+addButton("电立室门删除", deleteElectricRoomDoor)
+addButton("皮肤商店删除（只有夜晚才有用）", deleteSkinShop)
+
+-- ====== 设置保存与删除（仅白名单可见） ======
+if _G.IsWhitelisted then
+    addLabel("设置保存")
+
+    local saveBtn = Instance.new("TextButton")
+    saveBtn.Size = UDim2.new(1, 0, 0, 26)
+    saveBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+    saveBtn.Text = "保存选择"
+    saveBtn.Font = Enum.Font.GothamBold
+    saveBtn.TextSize = 11
+    saveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    saveBtn.AutoButtonColor = false
+    Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 6)
+    saveBtn.Parent = scroll
+    updateCanvas()
+
+    saveBtn.MouseButton1Click:Connect(function()
+        local data = {
+            MaxStaminaEnabled = MaxStaminaEnabled,
+            MaxStaminaValue = MaxStaminaValue,
+            StaminaRecoveryEnabled = StaminaRecoveryEnabled,
+            StaminaRecoveryValue = StaminaRecoveryValue,
+            ESPEnabled = ESPEnabled,
+            TeamCheckEnabled = TeamCheckEnabled,
+            NightVisionEnabled = NightVisionEnabled,
+            BatRangeEnabled = BatRangeEnabled,
+            BatRangeValue = BatRangeValue,
+            AutoBlockEnabled = AutoBlockEnabled,
+            BlockDetectionRange = BlockDetectionRange,
+            SafeZoneAuto = SafeZoneAuto,
+            SafeZoneHP = SafeZoneHP,
+            AdminCheckEnabled = AdminCheckEnabled,
+            PingDisplayEnabled = PingDisplayEnabled,
+            ServerPingDisplayEnabled = ServerPingDisplayEnabled,
+            AliceGrabEnabled = AliceGrabEnabled,
+            OwnsAlicePass = PassesEnabled.OwnsAlicePass,
+            HasVIP = PassesEnabled.HasVIP,
+            HasSwap = PassesEnabled.HasSwap,
+            currentMusicId = currentMusicId,
+        }
+        local json = game:GetService("HttpService"):JSONEncode(data)
+        if writefile then
+            writefile("FPES_Settings.json", json)
+            notify("保存", "设置已保存")
+        else
+            notify("保存失败", "当前环境不支持写入文件")
+        end
+    end)
+
+    local deleteSaveBtn = Instance.new("TextButton")
+    deleteSaveBtn.Size = UDim2.new(1, 0, 0, 26)
+    deleteSaveBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    deleteSaveBtn.Text = "删除保存"
+    deleteSaveBtn.Font = Enum.Font.GothamBold
+    deleteSaveBtn.TextSize = 11
+    deleteSaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    deleteSaveBtn.AutoButtonColor = false
+    Instance.new("UICorner", deleteSaveBtn).CornerRadius = UDim.new(0, 6)
+    deleteSaveBtn.Parent = scroll
+    updateCanvas()
+
+    deleteSaveBtn.MouseButton1Click:Connect(function()
+        if delfile then
+            delfile("FPES_Settings.json")
+            notify("删除保存", "已删除保存的设置")
+        else
+            notify("删除失败", "当前环境不支持删除文件")
+        end
+    end)
+end
+
+updateCanvas()
+
+-- 拖动系统
+local dragging, dragStart, startPos
+tb.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true; dragStart = input.Position; startPos = main.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local dotDragging, dotStart, dotStartPos
+local screenSize = workspace.CurrentCamera.ViewportSize
+miniDot.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dotDragging = true; dotStart = input.Position; dotStartPos = miniDot.Position
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dotDragging = false end end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dotDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dotStart
+        local newX = dotStartPos.X.Offset + delta.X
+        local newY = dotStartPos.Y.Offset + delta.Y
+        newX = math.clamp(newX, 0, screenSize.X - miniDot.AbsoluteSize.X)
+        newY = math.clamp(newY, 0, screenSize.Y - miniDot.AbsoluteSize.Y)
+        miniDot.Position = UDim2.new(0, newX, 0, newY)
+    end
+end)
+
+notify("FPE:S 脚本", "作者 jgft616 | 小号 sakfjje")
+print("✅ FPE:S 脚本已更新 - 透视所有玩家可用，含愤怒数字，弹窗已添加")
+
+-- ==================== 第三部分结束 ====================
