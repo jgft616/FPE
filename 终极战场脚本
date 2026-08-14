@@ -280,11 +280,10 @@ do
             Icon = "rbxassetid://915207093"
         })
         showSuccessAnimation("白名单验证通过")
-        task.wait(2)
     end
 end
 
--- ==================== 弹窗页面（所有玩家验证通过后显示） ====================
+-- ==================== 弹窗页面（验证通过后显示，关闭后继续执行主脚本） ====================
 do
     local Players = game:GetService("Players")
     local LP = Players.LocalPlayer
@@ -423,7 +422,7 @@ do
         if _G.IsWhitelisted then
             local neverBtn = Instance.new("TextButton", mainPopup)
             neverBtn.Size = UDim2.new(0, 130, 0, 30)
-            neverBtn.Position = UDim2.new(1, -140, 1, -40)
+            neverBtn.Position = UDim2.new(0.5, -65, 1, -130)  -- 居中，位于按钮容器上方
             neverBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
             neverBtn.Text = "永不显示弹窗"
             neverBtn.Font = Enum.Font.GothamBold
@@ -445,6 +444,11 @@ do
                 closeAdPopup()
             end)
         end
+
+        -- 阻塞直到弹窗被销毁（用户点击关闭或永不显示）
+        repeat
+            task.wait(0.1)
+        until not adGui.Parent
     end
 end
 
@@ -512,8 +516,10 @@ local teacherAttackAnimIDs = {
     18593007074, 18592978117, 81704410466143, 140314441187252,
 }
 
+-- 用于当前音乐选择
 local currentMusicId = nil
 
+-- 自动加载保存的设置
 do
     local success, content = pcall(function() return readfile("FPES_Settings.json") end)
     if success and content then
@@ -544,6 +550,7 @@ do
     end
 end
 
+-- ========== 队伍检测函数 ==========
 local function IsTeammate(player)
     if player == LP then return true end
     if not TeamCheckEnabled then return false end
@@ -561,6 +568,7 @@ local function IsTeammate(player)
     return false
 end
 
+-- ========== 爱丽丝抓取增大 ==========
 local function applyAliceGrab()
     if not AliceGrabEnabled then return end
     local targets = {}
@@ -591,6 +599,7 @@ local function applyAliceGrab()
                         targetFolder = "Teachers"
                     end
                     if myFolder and targetFolder and myFolder == targetFolder then
+                        -- 同阵营跳过
                     else
                         table.insert(targets, obj)
                     end
@@ -644,12 +653,14 @@ local function toggleAliceGrab(on)
     notify("爱丽丝抓取增大", on and "已开启" or "已关闭")
 end
 
+-- ========== 队伍检测切换 ==========
 local function toggleTeamCheck(on)
     TeamCheckEnabled = on
     notify("队伍检测", on and "已开启（队友绿/敌人红）" or "已关闭（全部视为敌人）")
     if ESPEnabled then refreshESP() end
 end
 
+-- ========== 夜视 ==========
 local function toggleNightVision(on)
     NightVisionEnabled = on
     if on then
@@ -673,7 +684,7 @@ spawn(function()
     end
 end)
 
--- ========== 透视系统（所有玩家可用，只含玩家名字和愤怒数字） ==========
+-- ========== 透视系统（所有玩家可用，含体力、愤怒数字，已删除移动状态和队友/敌人文字） ==========
 local espObjects = {}
 local function clearESP()
     for _, data in pairs(espObjects) do
@@ -706,7 +717,13 @@ local function refreshESP()
 
         local isFriend = IsTeammate(player)
         local color = isFriend and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-        local label = player.Name
+        local label = player.Name  -- 只显示玩家名字，不显示队友/敌人
+
+        -- 同时检查 Character 和 Player 的 stamina，并兼容大小写
+        local stamina = char:GetAttribute("stamina")
+            or player:GetAttribute("stamina")
+            or char:GetAttribute("Stamina")
+            or player:GetAttribute("Stamina")
 
         local enraged = char:GetAttribute("EnragedAmount")
             or player:GetAttribute("EnragedAmount")
@@ -722,7 +739,7 @@ local function refreshESP()
 
             local bill = Instance.new("BillboardGui")
             bill.AlwaysOnTop = true
-            bill.Size = UDim2.new(0, 140, 0, 40)
+            bill.Size = UDim2.new(0, 140, 0, 70)
             bill.StudsOffset = Vector3.new(0, 2.8, 0)
             bill.Adornee = head
             bill.Parent = head
@@ -736,6 +753,15 @@ local function refreshESP()
             txt.Size = UDim2.new(1, 0, 0, 18)
             txt.Position = UDim2.new(0, 0, 0, 0)
 
+            local staminaText = Instance.new("TextLabel", bill)
+            staminaText.BackgroundTransparency = 1
+            staminaText.TextColor3 = Color3.fromRGB(255, 255, 255)
+            staminaText.Font = Enum.Font.SourceSans
+            staminaText.TextSize = 12
+            staminaText.Size = UDim2.new(1, 0, 0, 16)
+            staminaText.Position = UDim2.new(0, 0, 0, 18)
+            staminaText.Text = "体力: --"
+
             local rageText = Instance.new("TextLabel", bill)
             rageText.Name = "RageText"
             rageText.BackgroundTransparency = 1
@@ -743,12 +769,13 @@ local function refreshESP()
             rageText.Font = Enum.Font.SourceSansBold
             rageText.TextSize = 12
             rageText.Size = UDim2.new(1, 0, 0, 16)
-            rageText.Position = UDim2.new(0, 0, 0, 20)
+            rageText.Position = UDim2.new(0, 0, 0, 34)
 
             local data = {
                 Highlight = hl,
                 Billboard = bill,
                 TextLabel = txt,
+                StaminaText = staminaText,
                 RageText = rageText
             }
             espObjects[player] = data
@@ -761,6 +788,11 @@ local function refreshESP()
 
         local data = espObjects[player]
         if data then
+            if stamina ~= nil then
+                data.StaminaText.Text = "体力: " .. tostring(math.floor(tonumber(stamina) or 0))
+            else
+                data.StaminaText.Text = "体力: --"
+            end
             if hasEnraged then
                 data.RageText.Visible = true
                 data.RageText.Text = "愤怒: " .. tostring(enraged)
@@ -783,7 +815,7 @@ local function toggleESP(on)
     ESPEnabled = on
     if on then
         refreshESP()
-        notify("透视", "已开启（0.1秒刷新，含愤怒数字）")
+        notify("透视", "已开启（0.1秒刷新，含体力/愤怒数字）")
     else
         clearESP()
         notify("透视", "已关闭")
@@ -1480,7 +1512,7 @@ addToggle("管理员检测", AdminCheckEnabled, function(on)
     notify("管理员检测", on and "已开启" or "已关闭")
 end)
 
--- ====== 爱丽丝抓取增大（仅白名单可见） ======
+-- ====== 爱丽丝抓取增大（仅白名单可见，固定倍率1000000） ======
 if _G.IsWhitelisted then
     addLabel("爱丽丝")
     addToggle("爱丽丝抓取增大", AliceGrabEnabled, toggleAliceGrab)
@@ -1598,7 +1630,7 @@ addLabel("删除")
 addButton("电立室门删除", deleteElectricRoomDoor)
 addButton("皮肤商店删除（只有夜晚才有用）", deleteSkinShop)
 
--- ====== 设置保存与删除（仅白名单可见） ======
+-- ====== 设置保存与删除（仅白名单可见，位于最底部） ======
 if _G.IsWhitelisted then
     addLabel("设置保存")
 
@@ -1706,6 +1738,6 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 notify("FPE:S 脚本", "作者 jgft616 | 小号 sakfjje")
-print("✅ FPE:S 脚本已更新 - 透视所有玩家可用，含愤怒数字，弹窗已添加")
+print("✅ FPE:S 脚本已更新 - 透视所有玩家可用，含体力/愤怒数字")
 
 -- ==================== 第三部分结束 ====================
