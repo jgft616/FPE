@@ -1,4 +1,4 @@
--- ==================== FPE 风格 UI 框架 ====================
+-- ==================== FPE 风格 UI 框架（含折叠功能） ====================
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 local TweenService = game:GetService("TweenService")
@@ -38,11 +38,24 @@ titleText.Font = Enum.Font.GothamBold
 titleText.TextSize = 16
 titleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleText.BackgroundTransparency = 1
-titleText.Size = UDim2.new(1, -70, 1, 0)
+titleText.Size = UDim2.new(1, -100, 1, 0)
 titleText.Position = UDim2.new(0, 12, 0, 0)
 titleText.TextXAlignment = Enum.TextXAlignment.Left
 titleText.Parent = titleBar
 
+-- 最小化按钮
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 30, 0, 30)
+minBtn.Position = UDim2.new(1, -70, 0, 3)
+minBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+minBtn.Text = "–"
+minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 16
+minBtn.Parent = titleBar
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 5)
+
+-- 关闭按钮
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 30, 0, 30)
 closeBtn.Position = UDim2.new(1, -35, 0, 3)
@@ -53,6 +66,60 @@ closeBtn.Font = Enum.Font.GothamBold
 closeBtn.TextSize = 16
 closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
+
+-- 悬浮球（折叠后显示，点击展开主窗口）
+local floatingBall = Instance.new("TextButton")
+floatingBall.Size = UDim2.new(0, 45, 0, 45)
+floatingBall.Position = UDim2.new(0, 10, 0, 10)
+floatingBall.BackgroundColor3 = Color3.fromRGB(255, 105, 180)
+floatingBall.Text = "⚙️"
+floatingBall.TextColor3 = Color3.fromRGB(255, 255, 255)
+floatingBall.Font = Enum.Font.GothamBold
+floatingBall.TextSize = 20
+floatingBall.Visible = false
+floatingBall.Parent = gui
+Instance.new("UICorner", floatingBall).CornerRadius = UDim.new(1, 0)
+
+-- 拖动悬浮球
+local ballDragging = false
+local ballDragStart = Vector2.zero
+local ballStartPos = floatingBall.Position
+floatingBall.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        ballDragging = true
+        ballDragStart = input.Position
+        ballStartPos = floatingBall.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                ballDragging = false
+            end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if ballDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - ballDragStart
+        local newX = ballStartPos.X.Offset + delta.X
+        local newY = ballStartPos.Y.Offset + delta.Y
+        local screenSize = workspace.CurrentCamera.ViewportSize
+        newX = math.clamp(newX, 0, screenSize.X - floatingBall.AbsoluteSize.X)
+        newY = math.clamp(newY, 0, screenSize.Y - floatingBall.AbsoluteSize.Y)
+        floatingBall.Position = UDim2.new(0, newX, 0, newY)
+    end
+end)
+
+minBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    floatingBall.Visible = true
+end)
+
+floatingBall.MouseButton1Click:Connect(function()
+    if not ballDragging then
+        main.Visible = true
+        floatingBall.Visible = false
+    end
+end)
+
 closeBtn.MouseButton1Click:Connect(function()
     gui:Destroy()
 end)
@@ -80,7 +147,6 @@ contentArea.Parent = main
 -- 标签页存储
 local tabs = {}
 
--- 创建标签页函数
 local function createTab(title)
     local index = #tabs + 1
     local btn = Instance.new("TextButton")
@@ -1233,7 +1299,6 @@ addSlider(emoteTab, "调整你选择的表情速度", 0.01, 5, 0.5, function(v)
     emoteData.SpamDelay = v
 end)
 
--- 快捷键设置（简化，固定G）
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.KeyCode == emoteData.Keybind and emoteData.Selected then
@@ -1249,7 +1314,6 @@ end)
 
 -- ==================== 设置标签页 ====================
 addButton(settingsTab, "保存配置", function()
-    -- 原版有配置系统，这里简单打印提示
     print("配置保存功能未实现")
 end)
 addButton(settingsTab, "加载配置", function()
