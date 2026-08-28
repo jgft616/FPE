@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlatoRelay 绕过工具 - 纯前端版</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            min-height: 100vh;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container { width: 100%; max-width: 600px; }
+
+        .card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .header { text-align: center; margin-bottom: 32px; }
+
+        .logo {
+            width: 64px; height: 64px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 32px; margin: 0 auto 16px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        h1 {
+            font-size: 28px; font-weight: 700; margin-bottom: 8px;
+            background: linear-gradient(135deg, #fff 0%, #a5b4fc 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle { color: rgba(255, 255, 255, 0.6); font-size: 14px; }
+
+        .input-section { margin-bottom: 24px; }
+
+        .input-label {
+            display: block; font-size: 14px; font-weight: 500;
+            margin-bottom: 10px; color: rgba(255, 255, 255, 0.8);
+        }
+
+        .input-wrapper { position: relative; }
+
+        .url-input {
+            width: 100%; padding: 16px 80px 16px 48px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px; color: #fff; font-size: 15px;
+            font-family: inherit; transition: all 0.3s ease; outline: none;
+        }
+
+        .url-input::placeholder { color: rgba(255, 255, 255, 0.4); }
+
+        .url-input:focus {
+            border-color: #667eea; background: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
+        }
+
+        .input-icon {
+            position: absolute; left: 16px; top: 50%;
+            transform: translateY(-50%); color: rgba(255, 255, 255, 0.5); font-size: 18px;
+        }
+
+        .paste-btn {
+            position: absolute; right: 8px; top: 50%;
+            transform: translateY(-50%); padding: 8px 14px;
+            background: rgba(255, 255, 255, 0.1); border: none;
+            border-radius: 8px; color: rgba(255, 255, 255, 0.8);
+            font-size: 13px; cursor: pointer; transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .paste-btn:hover { background: rgba(255, 255, 255, 0.2); }
+
+        .bypass-btn {
+            width: 100%; padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none; border-radius: 12px; color: #fff;
+            font-size: 16px; font-weight: 600; cursor: pointer;
+            transition: all 0.3s ease; font-family: inherit;
+            position: relative; overflow: hidden;
+        }
+
+        .bypass-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.5);
+        }
+
+        .bypass-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .btn-loading { display: none; }
+        .bypass-btn.loading .btn-text { display: none; }
+        .bypass-btn.loading .btn-loading { display: inline-flex; align-items: center; gap: 8px; }
+
+        .spinner {
+            width: 18px; height: 18px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .result-section { margin-top: 24px; display: none; }
+        .result-section.show { display: block; animation: fadeIn 0.3s ease; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .result-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px; padding: 20px;
+        }
+
+        .result-card.success { border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.08); }
+        .result-card.error { border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.08); }
+
+        .result-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .result-icon { font-size: 24px; }
+        .result-title { font-weight: 600; font-size: 16px; }
+
+        .result-content {
+            padding: 14px; background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 14px; word-break: break-all; line-height: 1.6;
+            margin-bottom: 12px; user-select: all;
+        }
+
+        .time-info {
+            display: none; margin-bottom: 12px; padding: 10px 14px;
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            border-radius: 8px; font-size: 13px; color: #fbbf24; text-align: center;
+        }
+        .time-info.show { display: block; }
+
+        .copy-btn {
+            width: 100%; padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px; color: #fff; font-size: 14px;
+            cursor: pointer; transition: all 0.2s ease; font-family: inherit;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+        }
+
+        .copy-btn:hover { background: rgba(255, 255, 255, 0.2); }
+        .copy-btn.copied { background: rgba(74, 222, 128, 0.2); border-color: rgba(74, 222, 128, 0.4); }
+
+        .progress-steps { display: none; margin-top: 20px; }
+        .progress-steps.show { display: block; }
+
+        .step-item {
+            display: flex; align-items: center; gap: 12px;
+            padding: 10px 0; font-size: 14px;
+            color: rgba(255, 255, 255, 0.5); transition: all 0.3s ease;
+        }
+
+        .step-item.active { color: #fff; }
+        .step-item.done { color: #4ade80; }
+
+        .step-dot {
+            width: 24px; height: 24px; border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; flex-shrink: 0;
+        }
+
+        .step-item.active .step-dot { background: #667eea; animation: pulse 1.5s ease-in-out infinite; }
+        .step-item.done .step-dot { background: #4ade80; }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.5); }
+            50% { box-shadow: 0 0 0 8px rgba(102, 126, 234, 0); }
+        }
+
+        .info-section {
+            margin-top: 28px; padding-top: 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .info-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: rgba(255, 255, 255, 0.8); }
+
+        .supported-links { display: flex; flex-wrap: wrap; gap: 8px; }
+
+        .link-tag {
+            padding: 6px 12px; background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px; font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .disclaimer {
+            margin-top: 24px; padding: 16px;
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            border-radius: 12px; font-size: 13px;
+            color: rgba(251, 191, 36, 0.9); line-height: 1.6;
+        }
+
+        .disclaimer strong { color: #fbbf24; }
+
+        .footer { text-align: center; margin-top: 24px; font-size: 12px; color: rgba(255, 255, 255, 0.4); }
+
+        .mode-badge {
+            display: inline-block; padding: 4px 12px;
+            background: rgba(74, 222, 128, 0.15);
+            border: 1px solid rgba(74, 222, 128, 0.3);
+            border-radius: 20px; font-size: 12px;
+            color: #4ade80; margin-top: 8px;
+        }
+
+        @media (max-width: 480px) {
+            .card { padding: 28px 20px; }
+            h1 { font-size: 22px; }
+            .url-input { padding: 14px 70px 14px 44px; font-size: 14px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <div class="logo">🚀</div>
+                <h1>PlatoRelay 绕过工具</h1>
+                <p class="subtitle">纯前端版 · 直接浏览器调用 API</p>
+                <div class="mode-badge" id="modeBadge">检测中...</div>
+            </div>
+
+            <div class="input-section">
+                <label class="input-label">输入 PlatoRelay 链接</label>
+                <div class="input-wrapper">
+                    <span class="input-icon">🔗</span>
+                    <input type="text" class="url-input" id="urlInput"
+                        placeholder="https://auth.platorelay.com/a?d=...">
+                    <button class="paste-btn" id="pasteBtn">粘贴</button>
+                </div>
+            </div>
+
+            <button class="bypass-btn" id="bypassBtn">
+                <span class="btn-text">✨ 开始绕过</span>
+                <span class="btn-loading">
+                    <span class="spinner"></span>
+                    正在绕过...
+                </span>
+            </button>
+
+            <div class="progress-steps" id="progressSteps">
+                <div class="step-item active" id="step1">
+                    <div class="step-dot">1</div>
+                    <span>提取 ticket，查询状态...</span>
+                </div>
+                <div class="step-item" id="step2">
+                    <div class="step-dot">2</div>
+                    <span>调用 PlatoRelay API...</span>
+                </div>
+                <div class="step-item" id="step3">
+                    <div class="step-dot">3</div>
+                    <span>解析密钥...</span>
+                </div>
+                <div class="step-item" id="step4">
+                    <div class="step-dot">4</div>
+                    <span>完成！</span>
+                </div>
+            </div>
+
+            <div class="result-section" id="resultSection">
+                <div class="result-card" id="resultCard">
+                    <div class="result-header">
+                        <span class="result-icon" id="resultIcon">✅</span>
+                        <span class="result-title" id="resultTitle">绕过成功！</span>
+                    </div>
+                    <div class="result-content" id="resultContent">FREE_xxx</div>
+                    <div class="time-info" id="timeInfo">⏱️ 剩余时间: --</div>
+                    <button class="copy-btn" id="copyBtn">
+                        <span id="copyText">📋 复制密钥</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="info-section">
+                <div class="info-title">工作原理</div>
+                <div class="supported-links">
+                    <span class="link-tag">直接调用 PlatoRelay API</span>
+                    <span class="link-tag">CORS 已开放</span>
+                    <span class="link-tag">无需后端</span>
+                </div>
+            </div>
+
+            <div class="disclaimer">
+                <strong>⚠️ 说明：</strong>
+                纯前端版可直接查询已完成的密钥（CORS 开放）。
+                对于未完成广告验证的新链接，会尝试轮询等待。如果链接需要完整绕过广告流程，
+                建议使用<a href="index.html" style="color:#a5b4fc">完整版</a>（需启动后端）。
+            </div>
+
+            <div class="footer">纯前端版 · PlatoRelay 专用</div>
+        </div>
+    </div>
+
+    <script>
+        // ========== DOM Elements ==========
+        const urlInput = document.getElementById('urlInput');
+        const pasteBtn = document.getElementById('pasteBtn');
+        const bypassBtn = document.getElementById('bypassBtn');
+        const resultSection = document.getElementById('resultSection');
+        const resultCard = document.getElementById('resultCard');
+        const resultIcon = document.getElementById('resultIcon');
+        const resultTitle = document.getElementById('resultTitle');
+        const resultContent = document.getElementById('resultContent');
+        const copyBtn = document.getElementById('copyBtn');
+        const copyText = document.getElementById('copyText');
+        const progressSteps = document.getElementById('progressSteps');
+        const timeInfo = document.getElementById('timeInfo');
+        const modeBadge = document.getElementById('modeBadge');
+
+        let currentKey = '';
+
+        // ========== 模式检测 ==========
+        async function detectMode() {
+            // 尝试连接后端（相对路径，适配任何域名）
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
+                const resp = await fetch('./api/status', { signal: controller });
+                clearTimeout(timeoutId);
+                if (resp.ok) {
+                    modeBadge.textContent = '🟢 完整模式（后端已连接）';
+                    modeBadge.style.background = 'rgba(102, 126, 234, 0.15)';
+                    modeBadge.style.borderColor = 'rgba(102, 126, 234, 0.3)';
+                    modeBadge.style.color = '#a5b4fc';
+                    return 'backend';
+                }
+            } catch (e) {
+                // 后端不可用
+            }
+            modeBadge.textContent = '🟡 纯前端模式（API 直连）';
+            modeBadge.style.background = 'rgba(251, 191, 36, 0.15)';
+            modeBadge.style.borderColor = 'rgba(251, 191, 36, 0.3)';
+            modeBadge.style.color = '#fbbf24';
+            return 'frontend';
+        }
+
+        // ========== 粘贴按钮 ==========
+        pasteBtn.addEventListener('click', async () => {
+            try {
+                const text = await navigator.clipboard.readText();
+                urlInput.value = text;
+                urlInput.focus();
+            } catch (err) {
+                alert('无法访问剪贴板，请手动粘贴');
+            }
+        });
+
+        // ========== 复制按钮 ==========
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(currentKey);
+                copyBtn.classList.add('copied');
+                copyText.textContent = '✅ 已复制！';
+                setTimeout(() => {
+                    copyBtn.classList.remove('copied');
+                    copyText.textContent = '📋 复制密钥';
+                }, 2000);
+            } catch (err) {
+                alert('复制失败，请手动复制');
+            }
+        });
+
+        // ========== 绕过按钮 ==========
+        bypassBtn.addEventListener('click', async () => {
+            const url = urlInput.value.trim();
+            if (!url) {
+                showResult('error', '❌', '请输入链接', '请先输入 PlatoRelay 链接地址');
+                return;
+            }
+
+            if (!url.includes('platorelay.com') && !url.includes('platoboost.com')) {
+                showResult('error', '❌', '不支持的链接', '此工具仅支持 platorelay.com / platoboost.com 链接');
+                return;
+            }
+
+            bypassBtn.classList.add('loading');
+            bypassBtn.disabled = true;
+            resultSection.classList.remove('show');
+            timeInfo.classList.remove('show');
+            progressSteps.classList.add('show');
+            resetSteps();
+
+            const mode = await detectMode();
+
+            try {
+                let result;
+                if (mode === 'backend') {
+                    // 完整模式：调用后端 deltax
+                    updateStep(1, true);
+                    updateStep(2, false);
+                    result = await bypassWithBackend(url);
+                } else {
+                    // 纯前端模式：直接调用 PlatoRelay API
+                    result = await bypassFrontend(url);
+                }
+
+                if (result.success) {
+                    currentKey = result.key;
+                    updateStep(4, true);
+                    showResult('success', '✅', '绕过成功！', result.key);
+                    if (result.timeLeft) {
+                        timeInfo.textContent = '⏱️ 剩余时间: ' + result.timeLeft;
+                        timeInfo.classList.add('show');
+                    }
+                } else {
+                    showResult('error', '❌', '绕过失败', result.message || '未知错误');
+                }
+            } catch (error) {
+                showResult('error', '❌', '绕过失败', error.message || '网络错误');
+            } finally {
+                bypassBtn.classList.remove('loading');
+                bypassBtn.disabled = false;
+                setTimeout(() => progressSteps.classList.remove('show'), 1000);
+            }
+        });
+
+        // ========== 后端模式 ==========
+        async function bypassWithBackend(url) {
+            const response = await fetch('./api/bypass', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: url })
+            });
+            updateStep(2, true);
+            updateStep(3, false);
+            const data = await response.json();
+            updateStep(3, true);
+            return data;
+        }
+
+        // ========== 纯前端模式 ==========
+        async function bypassFrontend(url) {
+            // 1. 提取 ticket
+            const urlObj = new URL(url);
+            const ticket = urlObj.searchParams.get('d');
+            if (!ticket) {
+                return { success: false, message: '无法从链接中提取 ticket 参数' };
+            }
+            updateStep(1, true);
+            updateStep(2, false);
+
+            // 2. 查询状态 API (CORS 已开放)
+            const statusUrl = `https://auth.platorelay.com/api/session/status?ticket=${encodeURIComponent(ticket)}`;
+            const response = await fetch(statusUrl, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            const data = await response.json();
+            updateStep(2, true);
+            updateStep(3, false);
+
+            if (data.success && data.data) {
+                const key = data.data.key;
+                const minutesLeft = data.data.minutesLeft || 0;
+
+                if (key && key !== 'KEY_NOT_FOUND') {
+                    // 密钥已存在
+                    updateStep(3, true);
+                    const hours = Math.floor(minutesLeft / 60);
+                    const minutes = minutesLeft % 60;
+                    return {
+                        success: true,
+                        key: key,
+                        timeLeft: minutesLeft > 0 ? `${hours}小时${minutes}分钟` : null
+                    };
+                } else {
+                    // KEY_NOT_FOUND - 需要完成广告
+                    // 尝试打开链接让用户完成
+                    updateStep(3, true);
+                    return {
+                        success: false,
+                        message: '此链接尚未完成广告验证（KEY_NOT_FOUND）。密钥需要先完成广告流程才能获取。\n\n解决方法：\n1. 启动完整版后端服务（./start.sh）\n2. 或者手动在浏览器打开链接完成广告'
+                    };
+                }
+            } else {
+                return { success: false, message: 'API 返回异常: ' + JSON.stringify(data) };
+            }
+        }
+
+        // ========== UI 辅助函数 ==========
+        function showResult(type, icon, title, content) {
+            resultCard.className = 'result-card ' + type;
+            resultIcon.textContent = icon;
+            resultTitle.textContent = title;
+            resultContent.textContent = content;
+            resultSection.classList.add('show');
+            copyBtn.style.display = type === 'error' ? 'none' : 'flex';
+        }
+
+        function resetSteps() {
+            for (let i = 1; i <= 4; i++) {
+                const step = document.getElementById('step' + i);
+                step.classList.remove('active', 'done');
+                step.querySelector('.step-dot').textContent = i;
+            }
+            document.getElementById('step1').classList.add('active');
+        }
+
+        function updateStep(stepNum, done = false) {
+            const step = document.getElementById('step' + stepNum);
+            if (done) {
+                step.classList.remove('active');
+                step.classList.add('done');
+                step.querySelector('.step-dot').textContent = '✓';
+            } else {
+                step.classList.add('active');
+            }
+        }
+
+        // ========== 初始化 ==========
+        detectMode();
+        urlInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') bypassBtn.click(); });
+    </script>
+</body>
+</html>

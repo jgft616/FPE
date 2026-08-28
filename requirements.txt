@@ -1,0 +1,9 @@
+flask
+flask-cors
+gunicorn
+curl_cffi
+requests
+pycryptodome
+cryptography
+numpy
+Pillow
