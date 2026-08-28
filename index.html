@@ -1,331 +1,998 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PlatoRelay 绕过工具</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%);min-height:100vh;color:#fff;display:flex;align-items:center;justify-content:center;padding:20px}
-.container{width:100%;max-width:640px}
-.card{background:rgba(255,255,255,.08);backdrop-filter:blur(20px);border-radius:24px;padding:40px;border:1px solid rgba(255,255,255,.1);box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
-.header{text-align:center;margin-bottom:32px}
-.logo{width:64px;height:64px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px;margin:0 auto 16px;box-shadow:0 10px 30px rgba(102,126,234,.4)}
-h1{font-size:28px;font-weight:700;margin-bottom:8px;background:linear-gradient(135deg,#fff 0%,#a5b4fc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.subtitle{color:rgba(255,255,255,.6);font-size:14px}
-.badge{display:inline-block;padding:4px 12px;background:rgba(74,222,128,.15);border:1px solid rgba(74,222,128,.3);border-radius:20px;font-size:12px;color:#4ade80;margin-top:8px}
-.input-section{margin-bottom:24px}
-.input-label{display:block;font-size:14px;font-weight:500;margin-bottom:10px;color:rgba(255,255,255,.8)}
-.input-wrapper{position:relative}
-.url-input{width:100%;padding:16px 80px 16px 48px;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.1);border-radius:12px;color:#fff;font-size:15px;font-family:inherit;transition:all .3s ease;outline:0}
-.url-input::placeholder{color:rgba(255,255,255,.4)}
-.url-input:focus{border-color:#667eea;background:rgba(255,255,255,.1);box-shadow:0 0 0 4px rgba(102,126,234,.2)}
-.input-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:rgba(255,255,255,.5);font-size:18px}
-.paste-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);padding:8px 14px;background:rgba(255,255,255,.1);border:none;border-radius:8px;color:rgba(255,255,255,.8);font-size:13px;cursor:pointer;transition:all .2s ease;font-family:inherit}
-.paste-btn:hover{background:rgba(255,255,255,.2)}
-.bypass-btn{width:100%;padding:16px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:600;cursor:pointer;transition:all .3s ease;font-family:inherit;position:relative;overflow:hidden}
-.bypass-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 30px rgba(102,126,234,.5)}
-.bypass-btn:disabled{opacity:.6;cursor:not-allowed}
-.btn-loading{display:none}
-.bypass-btn.loading .btn-text{display:none}
-.bypass-btn.loading .btn-loading{display:inline-flex;align-items:center;gap:8px}
-.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.result-section{margin-top:24px;display:none}
-.result-section.show{display:block;animation:fadeIn .3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-.result-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px}
-.result-card.success{border-color:rgba(74,222,128,.3);background:rgba(74,222,128,.08)}
-.result-card.error{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.08)}
-.result-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
-.result-icon{font-size:24px}
-.result-title{font-weight:600;font-size:16px}
-.result-content{padding:14px;background:rgba(0,0,0,.2);border-radius:8px;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:14px;word-break:break-all;line-height:1.6;margin-bottom:12px;user-select:all}
-.time-info{display:none;margin-bottom:12px;padding:10px 14px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:8px;font-size:13px;color:#fbbf24;text-align:center}
-.time-info.show{display:block}
-.copy-btn{width:100%;padding:10px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;font-size:14px;cursor:pointer;transition:all .2s ease;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px}
-.copy-btn:hover{background:rgba(255,255,255,.2)}
-.copy-btn.copied{background:rgba(74,222,128,.2);border-color:rgba(74,222,128,.4)}
-.log-section{margin-top:20px;display:none;max-height:200px;overflow-y:auto;background:rgba(0,0,0,.3);border-radius:8px;padding:12px;font-family:'SF Mono',Monaco,monospace;font-size:12px;line-height:1.6;color:rgba(255,255,255,.7)}
-.log-section.show{display:block}
-.log-entry{margin-bottom:2px}
-.log-entry.info{color:#a5b4fc}
-.log-entry.success{color:#4ade80}
-.log-entry.error{color:#f87171}
-.log-entry.warn{color:#fbbf24}
-.disclaimer{margin-top:24px;padding:16px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:12px;font-size:13px;color:rgba(251,191,36,.9);line-height:1.6}
-.disclaimer strong{color:#fbbf24}
-.footer{text-align:center;margin-top:24px;font-size:12px;color:rgba(255,255,255,.4)}
-@media(max-width:480px){.card{padding:28px 20px}h1{font-size:22px}.url-input{padding:14px 70px 14px 44px;font-size:14px}}
-</style>
-</head>
-<body>
-<div class="container">
-<div class="card">
-<div class="header">
-<div class="logo">🚀</div>
-<h1>PlatoRelay 绕过工具</h1>
-<p class="subtitle">纯前端版 · 无需服务器 · 支持绕过新链接</p>
-<div class="badge">✅ 纯前端运行 · 可部署 GitHub Pages</div>
-</div>
-<div class="input-section">
-<label class="input-label">输入 PlatoRelay 链接</label>
-<div class="input-wrapper">
-<span class="input-icon">🔗</span>
-<input type="text" class="url-input" id="urlInput" placeholder="https://auth.platorelay.com/a?d=...">
-<button class="paste-btn" id="pasteBtn">粘贴</button>
-</div>
-</div>
-<button class="bypass-btn" id="bypassBtn">
-<span class="btn-text">✨ 开始绕过</span>
-<span class="btn-loading"><span class="spinner"></span>正在绕过...</span>
-</button>
-<div class="log-section" id="logSection"></div>
-<div class="result-section" id="resultSection">
-<div class="result-card" id="resultCard">
-<div class="result-header">
-<span class="result-icon" id="resultIcon">✅</span>
-<span class="result-title" id="resultTitle">绕过成功！</span>
-</div>
-<div class="result-content" id="resultContent">FREE_xxx</div>
-<div class="time-info" id="timeInfo">⏱️ 剩余时间: --</div>
-<button class="copy-btn" id="copyBtn"><span id="copyText">📋 复制密钥</span></button>
-</div>
-</div>
-<div class="disclaimer">
-<strong>⚠️ 说明：</strong>纯前端版直接调用 PlatoRelay API + 外部验证码服务 + loot 绕过服务，所有 API 均已开放 CORS。无需任何后端服务器，可直接部署到 GitHub Pages。
-</div>
-<div class="footer">纯前端版 · PlatoRelay 专用 · 无需服务器</div>
-</div>
-</div>
-<script>
-const $=id=>document.getElementById(id);
-const urlInput=$('urlInput'),pasteBtn=$('pasteBtn'),bypassBtn=$('bypassBtn');
-const resultSection=$('resultSection'),resultCard=$('resultCard');
-const resultIcon=$('resultIcon'),resultTitle=$('resultTitle'),resultContent=$('resultContent');
-const copyBtn=$('copyBtn'),copyText=$('copyText'),timeInfo=$('timeInfo');
-const logSection=$('logSection');
-let currentKey='';
-function log(msg,type='info'){const entry=document.createElement('div');entry.className='log-entry '+type;entry.textContent='['+new Date().toLocaleTimeString()+'] '+msg;logSection.appendChild(entry);logSection.scrollTop=logSection.scrollHeight}
-function getParam(url,param){try{const u=new URL(url);return u.searchParams.get(param)}catch(e){return null}}
-function randInt(min,max){return Math.floor(Math.random()*(max-min+1))+min}
-function randChoice(arr){return arr[Math.floor(Math.random()*arr.length)]}
-async function aesCTREncrypt(keyStr,ivStr,payload){
-  const keyBytes=new Uint8Array(keyStr.split('').map(c=>c.charCodeAt(0)));
-  const ivBytes=new Uint8Array(ivStr.split('').map(c=>c.charCodeAt(0)));
-  const data=new TextEncoder().encode(payload);
-  const cryptoKey=await crypto.subtle.importKey('raw',keyBytes,{name:'AES-CTR'},false,['encrypt']);
-  const encrypted=await crypto.subtle.encrypt({name:'AES-CTR',counter:ivBytes,length:128},cryptoKey,data);
-  return[...new Uint8Array(encrypted)].map(b=>b.toString(16).padStart(2,'0')).join('');
-}
-const CHROME_VERSIONS=[120,123,124,131,136,142];
-const SCREEN_RES=['1920x1080','1366x768','1536x864','1440x900','1280x720','1600x900','2560x1440'];
-const PLATFORMS={
-  Windows:{ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',nav:'Win32',sec:'"Windows"'},
-  Linux:{ua:'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',nav:'Linux x86_64',sec:'"Linux"'},
-  macOS:{ua:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',nav:'MacIntel',sec:'"macOS"'}
-};
-const LANGUAGES=['en-US,en;q=0.9','en-GB,en;q=0.8','en-US,en;q=0.9,es;q=0.7'];
-function randomFingerprint(){
-  const platName=randChoice(['Windows','Windows','Windows','Windows','Windows','macOS','Linux']);
-  const plat=PLATFORMS[platName];
-  const v=randChoice(CHROME_VERSIONS);
-  const res=randChoice(SCREEN_RES);
-  return{userAgent:plat.ua.replace('{v}',v),platform:platName,navigatorPlatform:plat.nav,secChUaPlatform:plat.sec,language:randChoice(LANGUAGES),resolution:res,chromeVersion:v};
-}
-async function generateMeta(ticket,fp){
-  const res=fp.resolution.split('x');
-  const sw=parseInt(res[0]),sh=parseInt(res[1]);
-  const availH=sh-randChoice([40,48,32,23]);
-  const plugins=[{"name":"PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"Chrome PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"Chromium PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"Microsoft Edge PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"WebKit built-in PDF","filename":"internal-pdf-viewer","description":"Portable Document Format"}];
-  const mimetypes=[{"type":"application/pdf","description":"Portable Document Format","suffixes":"pdf"},{"type":"text/pdf","description":"Portable Document Format","suffixes":"pdf"}];
-  const conn=randChoice([{"effectiveType":"4g","downlink":10,"rtt":50},{"effectiveType":"4g","downlink":5,"rtt":75},{"effectiveType":"4g","downlink":2.5,"rtt":100}]);
-  const histLen=randChoice([1,2,3,4]);
-  const info=[{"name":"screen","data":{"width":sw,"height":sh,"availWidth":sw,"availHeight":availH,"colorDepth":24,"pixelDepth":24,"orientation":{"type":"landscape-primary","angle":0}}},{"name":"navigator","data":{"userAgent":fp.userAgent,"platform":fp.navigatorPlatform,"maxTouchPoints":0,"plugins":{"length":plugins.length,"item":plugins},"mimeTypes":{"length":mimetypes.length,"item":mimetypes}}},{"name":"performance","data":Date.now()},{"name":"history","data":{"length":histLen}},{"name":"webdriver","webdriver":false},{"name":"connection","data":Object.assign({},conn,{saveData:false})}];
-  const payload=JSON.stringify({browserInfo:info});
-  return await aesCTREncrypt(ticket.substring(0,16),ticket.substring(16,32),payload);
-}
-async function generateStream(ticket,sw,sh){
-  const now=Date.now();
-  const events=[];
-  function ev(typ,x,y,tag,t){events.push({"event":typ,"data":{"x":Math.max(0,Math.min(sw,Math.round(x))),"y":Math.max(0,Math.min(sh,Math.round(y))),"target":tag,"time":Math.round(t)}})}
-  const btnX=Math.round(sw*0.50)+randInt(-70,70);
-  const btnY=Math.round(sh*0.44)+randInt(-50,50);
-  let t=now-randInt(5000,14000);
-  const cx=randInt(Math.round(sw*0.10),Math.round(sw*0.90));
-  const cy=randInt(Math.round(sh*0.10),Math.round(sh*0.75));
-  for(let i=0;i<randInt(2,5);i++){t+=randInt(180,1400);ev(0,cx+randInt(-280,280),cy+randInt(-180,180),randChoice(['BODY','DIV','P','H1','H2','SPAN']),t)}
-  for(let i=0;i<randInt(2,4);i++){t+=randInt(50,320);ev(0,btnX+randInt(-6,6),btnY+randInt(-6,6),'BUTTON',t)}
-  t+=randInt(140,700);
-  ev(1,btnX+randInt(-3,3),btnY+randInt(-3,3),'BUTTON',t);
-  ev(0,btnX+randInt(-6,6),btnY+randInt(-6,6),'BUTTON',t-randInt(14,55));
-  events.push({"event":5,"data":{"time":now,"length":0}});
-  const payload=JSON.stringify({events:events});
-  return await aesCTREncrypt(ticket.substring(1,17),ticket.substring(17,33),payload);
-}
-async function checkKey(ticket){
-  try{
-    const resp=await fetch('https://auth.platorelay.com/api/session/status?ticket='+encodeURIComponent(ticket));
-    const data=await resp.json();
-    if(data.success&&data.data){
-      const key=data.data.key;
-      const minutes=data.data.minutesLeft||0;
-      if(key&&key!=='KEY_NOT_FOUND')return{key:key,minutes:minutes}
+// PlatoRelay GIF Captcha Solver (JavaScript port of deltax)
+// Supports driftodd and coherence captcha types
+
+'use strict';
+
+// ============ GIF Parsing (LZW decoder) ============
+
+function parseGIF(buffer) {
+  const data = new Uint8Array(buffer);
+  let pos = 0;
+
+  // Header
+  const signature = String.fromCharCode(data[0], data[1], data[2]);
+  if (signature !== 'GIF') throw new Error('Not a GIF');
+  pos += 6;
+
+  // Logical Screen Descriptor (7 bytes total: w2+h2+packed1+bg1+aspect1)
+  const cw = data[pos] | (data[pos + 1] << 8);
+  const ch = data[pos + 2] | (data[pos + 3] << 8);
+  const packed = data[pos + 4];
+  const hasGCT = (packed >> 7) & 1;
+  const gctSize = 3 * (2 ** ((packed & 0x7) + 1));
+  pos += 7;
+
+  let gct = null;
+  if (hasGCT) {
+    gct = data.slice(pos, pos + gctSize);
+    pos += gctSize;
+  }
+
+  const frames = [];
+  let delay = 0;
+  let transparentIndex = -1;
+
+  while (pos < data.length) {
+    const block = data[pos];
+    pos++;
+
+    if (block === 0x3B) break; // Trailer
+
+    if (block === 0x21) { // Extension
+      const label = data[pos];
+      pos++;
+      if (label === 0xF9) { // Graphics Control Extension
+        pos += 1;
+        const flags = data[pos];
+        delay = (data[pos + 1] | (data[pos + 2] << 8)) * 10;
+        pos += 2;
+        transparentIndex = (flags & 1) ? data[pos] : -1;
+        pos += 2;
+      } else {
+        while (true) {
+          const sz = data[pos];
+          pos++;
+          if (!sz) break;
+          pos += sz;
+        }
+      }
+    } else if (block === 0x2C) { // Image Descriptor
+      const fx = data[pos] | (data[pos + 1] << 8);
+      const fy = data[pos + 2] | (data[pos + 3] << 8);
+      const fw = data[pos + 4] | (data[pos + 5] << 8);
+      const fh = data[pos + 6] | (data[pos + 7] << 8);
+      const ipacked = data[pos + 8];
+      pos += 9;
+
+      const hasLCT = (ipacked >> 7) & 1;
+      const lctSize = hasLCT ? 3 * (2 ** ((ipacked & 0x7) + 1)) : 0;
+      const ct = hasLCT ? data.slice(pos, pos + lctSize) : gct;
+      if (hasLCT) pos += lctSize;
+
+      const minCode = data[pos];
+      pos++;
+
+      // Read LZW data
+      const lzwData = [];
+      while (true) {
+        const sz = data[pos];
+        pos++;
+        if (!sz) break;
+        for (let i = 0; i < sz; i++) lzwData.push(data[pos + i]);
+        pos += sz;
+      }
+
+      const pixels = lzwDecode(lzwData, minCode, fw * fh);
+
+      // Build patch RGBA
+      const patch = new Uint8ClampedArray(fw * fh * 4);
+      for (let i = 0; i < pixels.length; i++) {
+        const ci = pixels[i];
+        const ci3 = ci * 3;
+        const pi = i * 4;
+        if (ci3 + 2 < ct.length) {
+          patch[pi] = ct[ci3];
+          patch[pi + 1] = ct[ci3 + 1];
+          patch[pi + 2] = ct[ci3 + 2];
+          patch[pi + 3] = (ci === transparentIndex) ? 0 : 255;
+        }
+      }
+
+      frames.push({ x: fx, y: fy, w: fw, h: fh, delay, patch });
     }
-    return null
-  }catch(e){return null}
-}
-async function getMetadata(ticket){
-  for(let i=0;i<3;i++){
-    try{
-      const resp=await fetch('https://auth.platorelay.com/api/session/metadata?ticket='+encodeURIComponent(ticket));
-      const data=await resp.json();
-      if(data.success)return data.data||{};
-      return null
-    }catch(e){await new Promise(r=>setTimeout(r,300))}
   }
-  return null
+
+  return { w: cw, h: ch, frames };
 }
-async function solveCaptchaExternal(){
-  for(let i=0;i<37;i++){
-    try{
-      const resp=await fetch('https://tirex-delta.vercel.app/api/solve');
-      const data=await resp.json();
-      if(data.success&&data.token)return data.token
-    }catch(e){}
-    await new Promise(r=>setTimeout(r,500))
+
+function lzwDecode(data, minCodeSize, pixelCount) {
+  const clearCode = 1 << minCodeSize;
+  const eoiCode = clearCode + 1;
+  let codeSize = minCodeSize + 1;
+
+  const dict = [];
+  for (let i = 0; i < clearCode; i++) dict.push([i]);
+  dict.push([clearCode]); // clear
+  dict.push([eoiCode]);   // eoi
+
+  const pixels = new Uint16Array(pixelCount);
+  let pixIdx = 0;
+
+  let bitPos = 0;
+  let currCode = 0;
+  let prev = null;
+
+  while (pixIdx < pixelCount) {
+    // Read next code
+    let code = 0;
+    for (let b = 0; b < codeSize; b++) {
+      const byteIdx = (bitPos >> 3) | 0;
+      const bitIdx = bitPos & 7;
+      if (byteIdx >= data.length) break;
+      code |= ((data[byteIdx] >> bitIdx) & 1) << b;
+      bitPos++;
+    }
+
+    if (code === eoiCode) break;
+
+    if (code === clearCode) {
+      dict.length = 0;
+      for (let i = 0; i < clearCode; i++) dict.push([i]);
+      dict.push([clearCode]);
+      dict.push([eoiCode]);
+      codeSize = minCodeSize + 1;
+      prev = null;
+      continue;
+    }
+
+    let output;
+    if (code < dict.length) {
+      output = dict[code];
+    } else if (code === dict.length && prev !== null) {
+      output = prev.concat(prev[0]);
+    } else {
+      break;
+    }
+
+    for (let i = 0; i < output.length && pixIdx < pixelCount; i++) {
+      pixels[pixIdx++] = output[i];
+    }
+
+    if (prev !== null && dict.length < 4096) {
+      dict.push(prev.concat(output[0]));
+      if (dict.length === (1 << codeSize) && codeSize < 12) codeSize++;
+    }
+    prev = output;
   }
-  return null
+
+  return pixels;
 }
-async function bypassLoot(lootUrl){
-  const apiKey='TRW_FREE-GAY-15a92945-9b04-4c75-8337-f2a6007281e9';
-  const url='https://trw.lat/api/bypass?apikey='+apiKey+'&mode=stream&url='+encodeURIComponent(lootUrl);
-  try{
-    const resp=await fetch(url);
-    const reader=resp.body.getReader();
-    const decoder=new TextDecoder();
-    let buffer='';
-    while(true){
-      const{done,value}=await reader.read();
-      if(done)break;
-      buffer+=decoder.decode(value,{stream:true});
-      const lines=buffer.split('\n');
-      buffer=lines.pop()||'';
-      for(const line of lines){
-        const trimmed=line.trim();
-        if(!trimmed.startsWith('data:'))continue;
-        try{
-          const evt=JSON.parse(trimmed.substring(5).trim());
-          if(evt.success&&evt.result)return evt.result;
-          if(evt.status&&!['started','processing',null].includes(evt.status))break
-        }catch(e){}
+
+// ============ Frame Composition ============
+
+function compositeFrames(gif) {
+  const { w, h, frames } = gif;
+  const composed = [];
+  let canvas = new Uint8ClampedArray(w * h * 4); // all zeros
+
+  for (const frame of frames) {
+    const nextCanvas = new Uint8ClampedArray(canvas);
+    const { x: fx, y: fy, w: fw, h: fh, patch } = frame;
+
+    for (let y = 0; y < fh; y++) {
+      const cy = fy + y;
+      if (cy < 0 || cy >= h) continue;
+      for (let x = 0; x < fw; x++) {
+        const cx = fx + x;
+        if (cx < 0 || cx >= w) continue;
+        const pi = (y * fw + x) * 4;
+        if (patch[pi + 3] > 0) {
+          const di = (cy * w + cx) * 4;
+          nextCanvas[di] = patch[pi];
+          nextCanvas[di + 1] = patch[pi + 1];
+          nextCanvas[di + 2] = patch[pi + 2];
+          nextCanvas[di + 3] = 255;
+        }
       }
     }
-  }catch(e){log('Loot bypass error: '+e.message,'error')}
-  return null
-}
-async function stepPut(ticket,service,hashParam,captcha,meta,stream){
-  let stepUrl='https://auth.platorelay.com/api/session/step?ticket='+encodeURIComponent(ticket)+'&service='+service;
-  if(hashParam)stepUrl+='&hash='+hashParam;
-  const payload={captcha:captcha,meta:meta,stream:stream,resolved:true};
-  const resp=await fetch(stepUrl,{method:'PUT',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
-  return await resp.json()
-}
-async function bypassPlatoRelay(url){
-  logSection.innerHTML='';
-  logSection.classList.add('show');
-  resultSection.classList.remove('show');
-  timeInfo.classList.remove('show');
-  const ticket=getParam(url,'d')||getParam(url,'ticket');
-  if(!ticket)throw new Error('无法从链接提取 ticket');
-  const hashParam=getParam(url,'hash');
-  const fp=randomFingerprint();
-  const res=fp.resolution.split('x');
-  const sw=parseInt(res[0]),sh=parseInt(res[1]);
-  log('Ticket: '+ticket.substring(0,20)+'...','info');
-  log('指纹: '+fp.platform+' Chrome/'+fp.chromeVersion,'info');
-  log('检查密钥状态...','info');
-  const existing=await checkKey(ticket);
-  if(existing){log('密钥已存在！','success');return{key:existing.key,minutes:existing.minutes}}
-  log('获取元数据...','info');
-  let meta=await getMetadata(ticket);
-  if(!meta)throw new Error('获取元数据失败');
-  let currentTicket=ticket;
-  let currentHash=hashParam;
-  const completed=meta.completed||0;
-  const total=(meta.activeRevenueProfile||{}).checkpointCount||0;
-  log('检查点: '+completed+'/'+total,'info');
-  for(let round=0;round<20;round++){
-    log('--- 第 '+(round+1)+' 轮 ---','info');
-    meta=await getMetadata(currentTicket);
-    if(!meta){log('元数据获取失败','error');continue}
-    const comp=meta.completed||0;
-    const tot=(meta.activeRevenueProfile||{}).checkpointCount||0;
-    const etOn=meta.enableEventTracker||false;
-    const serviceBits=((meta.activeRevenueProfile||{}).service)||0;
-    let svc=1;
-    if(serviceBits&1)svc=1;else if(serviceBits&2)svc=2;else if(serviceBits&4)svc=4;
-    log('检查点: '+comp+'/'+tot,'info');
-    if(comp>=tot){log('所有检查点完成！','success');break}
-    const metaEnc=await generateMeta(currentTicket,fp);
-    const streamEnc=etOn?await generateStream(currentTicket,sw,sh):'';
-    log('尝试提交步骤...','info');
-    let stepResp=await stepPut(currentTicket,svc,currentHash,null,metaEnc,streamEnc);
-    let lootUrl=(stepResp.data||{}).url;
-    if(!lootUrl){
-      log('需要验证码，正在获取...','warn');
-      const captcha=await solveCaptchaExternal();
-      if(!captcha){log('验证码获取失败，重试...','error');continue}
-      log('验证码: '+captcha.substring(0,20)+'...','success');
-      const metaEnc2=await generateMeta(currentTicket,fp);
-      const streamEnc2=etOn?await generateStream(currentTicket,sw,sh):'';
-      stepResp=await stepPut(currentTicket,svc,currentHash,captcha,metaEnc2,streamEnc2);
-      lootUrl=(stepResp.data||{}).url
-    }
-    if(!lootUrl){
-      log('步骤返回无URL','warn');
-      const check=await checkKey(currentTicket);
-      if(check){log('密钥已生成！','success');return{key:check.key,minutes:check.minutes}}
-      await new Promise(r=>setTimeout(r,500));continue
-    }
-    log('获得广告链接: '+lootUrl.substring(0,50)+'...','info');
-    log('绕过广告链接...','info');
-    const result=await bypassLoot(lootUrl);
-    if(!result){log('广告绕过失败，重试...','error');continue}
-    log('广告绕过成功: '+result.substring(0,50)+'...','success');
-    const newTicket=getParam(result,'d')||getParam(result,'ticket');
-    if(newTicket){currentTicket=newTicket;currentHash=getParam(result,'hash');log('更新 ticket','info')}
-    try{await Promise.allSettled([fetch(lootUrl,{mode:'no-cors'}).catch(()=>{}),fetch(result,{mode:'no-cors'}).catch(()=>{})])}catch(e){}
-    await new Promise(r=>setTimeout(r,200))
+
+    composed.push(nextCanvas);
+    canvas = nextCanvas;
   }
-  log('解锁中...','info');
-  meta=await getMetadata(currentTicket)||{};
-  const etOn2=meta.enableEventTracker||false;
-  const metaEnc3=await generateMeta(currentTicket,fp);
-  const streamEnc3=etOn2?await generateStream(currentTicket,sw,sh):'';
-  try{await stepPut(currentTicket,1,currentHash,null,metaEnc3,streamEnc3)}catch(e){log('解锁请求错误','warn')}
-  await new Promise(r=>setTimeout(r,200));
-  log('获取密钥...','info');
-  const finalResult=await checkKey(currentTicket);
-  if(finalResult){log('绕过成功！','success');return{key:finalResult.key,minutes:finalResult.minutes}}
-  throw new Error('绕过失败，密钥未找到。可能需要重试。')
+
+  return composed;
 }
-pasteBtn.addEventListener('click',async()=>{try{urlInput.value=await navigator.clipboard.readText();urlInput.focus()}catch(e){alert('无法访问剪贴板，请手动粘贴')}});
-copyBtn.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(currentKey);copyBtn.classList.add('copied');copyText.textContent='✅ 已复制！';setTimeout(()=>{copyBtn.classList.remove('copied');copyText.textContent='📋 复制密钥'},2000)}catch(e){alert('复制失败，请手动复制')}});
-bypassBtn.addEventListener('click',async()=>{
-  const url=urlInput.value.trim();
-  if(!url){showResult('error','❌','请输入链接','请先输入 PlatoRelay 链接地址');return}
-  if(!url.includes('platorelay.com')&&!url.includes('platoboost.com')){showResult('error','❌','不支持的链接','此工具仅支持 platorelay.com 链接');return}
-  bypassBtn.classList.add('loading');bypassBtn.disabled=true;resultSection.classList.remove('show');
-  try{
-    const result=await bypassPlatoRelay(url);
-    if(result.key){currentKey=result.key;showResult('success','✅','绕过成功！',result.key);if(result.minutes>0){const h=Math.floor(result.minutes/60);const m=result.minutes%60;timeInfo.textContent='⏱️ 剩余时间: '+h+'小时'+m+'分钟';timeInfo.classList.add('show')}}
-    else{showResult('error','❌','绕过失败','密钥未找到')}
-  }catch(e){log(e.message,'error');showResult('error','❌','绕过失败',e.message)}
-  finally{bypassBtn.classList.remove('loading');bypassBtn.disabled=false}
-});
-function showResult(type,icon,title,content){resultCard.className='result-card '+type;resultIcon.textContent=icon;resultTitle.textContent=title;resultContent.textContent=content;resultSection.classList.add('show');copyBtn.style.display=type==='error'?'none':'flex'}
-urlInput.addEventListener('keypress',e=>{if(e.key==='Enter')bypassBtn.click()});
-</script>
-</body>
-</html>
+
+// ============ Image Processing Helpers ============
+
+function detectBg(rgba, w, h) {
+  const C = 12;
+  const samplesR = [], samplesG = [], samplesB = [];
+  for (let y = 0; y < Math.min(C, h); y++) {
+    for (let x = 0; x < Math.min(C, w); x++) {
+      const pts = [
+        [x, y], [w - 1 - x, y],
+        [x, h - 1 - y], [w - 1 - x, h - 1 - y]
+      ];
+      for (const [px, py] of pts) {
+        if (px >= 0 && px < w && py >= 0 && py < h) {
+          const i = (py * w + px) * 4;
+          samplesR.push(rgba[i]);
+          samplesG.push(rgba[i + 1]);
+          samplesB.push(rgba[i + 2]);
+        }
+      }
+    }
+  }
+  return {
+    bgR: median(samplesR),
+    bgG: median(samplesG),
+    bgB: median(samplesB),
+  };
+}
+
+function median(arr) {
+  const sorted = arr.slice().sort((a, b) => a - b);
+  const mid = (sorted.length / 2) | 0;
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+function saturation(r, g, b) {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const maxC = Math.max(rn, gn, bn);
+  const minC = Math.min(rn, gn, bn);
+  const l = (maxC + minC) / 2;
+  if (maxC === minC) return 0;
+  const d = maxC - minC;
+  return d / (l > 0.5 ? (2 - maxC - minC) : (maxC + minC));
+}
+
+function findBlobs(rgba, w, h, bgR, bgG, bgB, thresh = 22, minSize = 12, minSat = 0) {
+  // Build foreground mask
+  const fg = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      const diff = Math.abs(rgba[i] - bgR) + Math.abs(rgba[i + 1] - bgG) + Math.abs(rgba[i + 2] - bgB);
+      fg[y * w + x] = diff > thresh ? 1 : 0;
+    }
+  }
+
+  const visited = new Uint8Array(w * h);
+  const blobs = [];
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      if (!fg[idx] || visited[idx]) continue;
+
+      // BFS
+      const queue = [[x, y]];
+      const pixels = [];
+      visited[idx] = 1;
+      let ri = 0, gi = 0, bi = 0;
+
+      while (queue.length) {
+        const [cx, cy] = queue.shift();
+        pixels.push([cx, cy]);
+        const pi = (cy * w + cx) * 4;
+        ri += rgba[pi];
+        gi += rgba[pi + 1];
+        bi += rgba[pi + 2];
+
+        const neighbors = [[cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]];
+        for (const [nx, ny] of neighbors) {
+          if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+          const ni = ny * w + nx;
+          if (!visited[ni] && fg[ni]) {
+            visited[ni] = 1;
+            queue.push([nx, ny]);
+          }
+        }
+      }
+
+      if (pixels.length < minSize) continue;
+      const n = pixels.length;
+      let cxMean = 0, cyMean = 0;
+      for (const [px, py] of pixels) {
+        cxMean += px;
+        cyMean += py;
+      }
+      cxMean /= n;
+      cyMean /= n;
+      const mr = ri / n, mg = gi / n, mb = bi / n;
+      const sat = saturation(mr, mg, mb);
+      if (sat < minSat) continue;
+
+      blobs.push({ cx: cxMean, cy: cyMean, size: n, r: mr, g: mg, b: mb, sat });
+    }
+  }
+
+  return blobs.sort((a, b) => b.size - a.size);
+}
+
+function detectSatThreshold(rgba, w, h, bgR, bgG, bgB) {
+  const allBlobs = findBlobs(rgba, w, h, bgR, bgG, bgB, 22, 4, 0);
+  if (allBlobs.length < 3) return 0;
+  const sats = allBlobs.map(b => b.sat).sort((a, b) => a - b);
+  let maxGap = 0, gapAt = 0;
+  for (let i = 1; i < sats.length; i++) {
+    const gap = sats[i] - sats[i - 1];
+    if (gap > maxGap) {
+      maxGap = gap;
+      gapAt = sats[i - 1];
+    }
+  }
+  const threshold = maxGap > 0.10 ? (gapAt + maxGap * 0.5) : 0;
+  const nAbove = sats.filter(s => s > threshold).length;
+  return (threshold > 0 && nAbove >= 3) ? threshold : 0;
+}
+
+function trackBlobs(composed, w, h, bgR, bgG, bgB, seeds, thresh = 22, minSize = 10, maxDist = 60, minSat = 0) {
+  const tracks = seeds.map(b => [{ cx: b.cx, cy: b.cy, r: b.r, g: b.g, b: b.b, sat: b.sat }]);
+
+  for (let fi = 1; fi < composed.length; fi++) {
+    const frameBlobs = findBlobs(composed[fi], w, h, bgR, bgG, bgB, thresh, minSize, minSat);
+    const pairs = [];
+
+    for (let ai = 0; ai < tracks.length; ai++) {
+      const track = tracks[ai];
+      const valid = track.filter(p => p !== null);
+      if (!valid.length) continue;
+      const last = valid[valid.length - 1];
+      let predCx = last.cx, predCy = last.cy;
+      if (valid.length >= 2) {
+        const prev = valid[valid.length - 2];
+        predCx = last.cx + (last.cx - prev.cx);
+        predCy = last.cy + (last.cy - prev.cy);
+      }
+
+      for (let bi = 0; bi < frameBlobs.length; bi++) {
+        const fb = frameBlobs[bi];
+        const dist = Math.hypot(fb.cx - last.cx, fb.cy - last.cy);
+        if (dist >= maxDist) continue;
+        const spPred = Math.hypot(fb.cx - predCx, fb.cy - predCy);
+        const cd = Math.sqrt((fb.r - last.r) ** 2 + (fb.g - last.g) ** 2 + (fb.b - last.b) ** 2);
+        pairs.push({ score: spPred + cd * 0.25, ai, bi, fb });
+      }
+    }
+
+    pairs.sort((a, b) => a.score - b.score);
+    const usedA = new Set(), usedB = new Set();
+    const asgn = {};
+    for (const p of pairs) {
+      if (usedA.has(p.ai) || usedB.has(p.bi)) continue;
+      usedA.add(p.ai);
+      usedB.add(p.bi);
+      asgn[p.ai] = p.fb;
+    }
+
+    for (let ai = 0; ai < tracks.length; ai++) {
+      tracks[ai].push(asgn[ai] || null);
+    }
+  }
+
+  return tracks;
+}
+
+function fitCircle(pts) {
+  const n = pts.length;
+  if (n < 4) return null;
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p[0]; my += p[1]; }
+  mx /= n; my /= n;
+
+  const u = pts.map(p => [p[0] - mx, p[1] - my]);
+  let suu = 0, svv = 0, suv = 0, suuu = 0, svvv = 0, suvv = 0, svuu = 0;
+  for (const [ux, uy] of u) {
+    suu += ux * ux;
+    svv += uy * uy;
+    suv += ux * uy;
+    suuu += ux ** 3;
+    svvv += uy ** 3;
+    suvv += ux * uy * uy;
+    svuu += uy * ux * ux;
+  }
+
+  const r1 = 0.5 * (suuu + suvv);
+  const r2 = 0.5 * (svvv + svuu);
+  const det = suu * svv - suv * suv;
+  if (Math.abs(det) < 1e-8) return null;
+
+  const uc = (r1 * svv - r2 * suv) / det;
+  const vc = (r2 * suu - r1 * suv) / det;
+  const radius = Math.sqrt(uc * uc + vc * vc + (suu + svv) / n);
+  if (!isFinite(radius) || radius < 1 || radius > 3000) return null;
+
+  return { cx: uc + mx, cy: vc + my, r: radius };
+}
+
+function unwrapAngles(angles) {
+  if (!angles.length) return [];
+  const out = [angles[0]];
+  for (let i = 1; i < angles.length; i++) {
+    let d = angles[i] - out[out.length - 1];
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    out.push(out[out.length - 1] + d);
+  }
+  return out;
+}
+
+function linReg(xs, ys) {
+  const n = xs.length;
+  if (n < 3) return { slope: 0, r2: 0 };
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+  mx /= n; my /= n;
+
+  let sxx = 0, sxy = 0, syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxx += (xs[i] - mx) ** 2;
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    syy += (ys[i] - my) ** 2;
+  }
+  if (sxx < 1e-12) return { slope: 0, r2: 0 };
+  const slope = sxy / sxx;
+  let ssRes = 0;
+  for (let i = 0; i < n; i++) {
+    ssRes += (ys[i] - (slope * xs[i] + my - slope * mx)) ** 2;
+  }
+  const r2 = Math.max(0, syy > 1e-12 ? (1 - ssRes / syy) : 1);
+  return { slope, r2 };
+}
+
+function shoelaceDir(pts) {
+  const n = pts.length;
+  if (n < 4) return null;
+  let mx = 0, my = 0;
+  for (const p of pts) { mx += p[0]; my += p[1]; }
+  mx /= n; my /= n;
+
+  let pos = 0, neg = 0;
+  for (let i = 1; i < n; i++) {
+    const ax = pts[i - 1][0] - mx;
+    const ay = pts[i - 1][1] - my;
+    const bx = pts[i][0] - mx;
+    const by = pts[i][1] - my;
+    const cross = ax * by - ay * bx;
+    if (cross > 0) pos += cross;
+    else neg -= cross;
+  }
+
+  const total = pos + neg;
+  if (total < 1e-6) return null;
+  return { dir: pos > neg ? 'CCW' : 'CW', dominance: Math.max(pos, neg) / total };
+}
+
+// ============ driftodd Solver ============
+
+function solveDriftodd(gif, composed) {
+  const { w, h } = gif;
+  const bg = detectBg(composed[0], w, h);
+  const { bgR, bgG, bgB } = bg;
+  const nFrames = composed.length;
+  const satThresh = detectSatThreshold(composed[0], w, h, bgR, bgG, bgB);
+
+  let seeds = null;
+  let bestBlobs = null;
+  for (const minSz of [3, 4, 5, 6, 8, 10, 12, 15, 20, 30, 50, 80]) {
+    const blobs = findBlobs(composed[0], w, h, bgR, bgG, bgB, 22, minSz, satThresh);
+    if (blobs.length >= 5 && blobs.length <= 25) {
+      bestBlobs = blobs;
+      break;
+    }
+    if (!bestBlobs || blobs.length > bestBlobs.length) {
+      if (blobs.length >= 3 && blobs.length <= 30) {
+        bestBlobs = blobs;
+      }
+    }
+  }
+  if (bestBlobs) {
+    seeds = bestBlobs.slice(0, 25);
+  }
+
+  if (!seeds || seeds.length < 3) {
+    for (let fi = 1; fi < Math.min(nFrames, 6); fi++) {
+      for (const minSz of [6, 8, 12, 15, 20, 30]) {
+        const blobs = findBlobs(composed[fi], w, h, bgR, bgG, bgB, 22, minSz, satThresh);
+        if (blobs.length >= 4 && blobs.length <= 25 && blobs.length > (seeds ? seeds.length : 0)) {
+          seeds = blobs.slice(0, 20);
+        }
+      }
+    }
+  }
+
+  if (!seeds || seeds.length < 2) {
+    const blobs = findBlobs(composed[0], w, h, bgR, bgG, bgB, 22, 4, satThresh);
+    if (blobs.length >= 3) {
+      seeds = blobs.slice(0, 20);
+    }
+  }
+
+  if (!seeds || seeds.length < 2) {
+    return { answer: null, reason: 'no seeds' };
+  }
+
+  seeds = seeds.slice(0, 20);
+  const tracks = trackBlobs(composed, w, h, bgR, bgG, bgB, seeds, 22, 6, 70, satThresh);
+
+  const classified = [];
+  for (let ti = 0; ti < tracks.length; ti++) {
+    const track = tracks[ti];
+    const valid = track.map((p, i) => [i, p]).filter(([_, p]) => p !== null);
+    if (valid.length < Math.max(4, nFrames * 0.25)) continue;
+
+    const pts = valid.map(([_, p]) => p);
+    const xyPts = pts.map(p => [p.cx, p.cy]);
+    const circ = fitCircle(xyPts);
+    const meanCx = xyPts.reduce((s, p) => s + p[0], 0) / xyPts.length;
+    const meanCy = xyPts.reduce((s, p) => s + p[1], 0) / xyPts.length;
+    const orbitCx = circ ? circ.cx : meanCx;
+    const orbitCy = circ ? circ.cy : meanCy;
+    let maxDisp = 0;
+    for (const p of xyPts) {
+      const d = Math.hypot(p[0] - xyPts[0][0], p[1] - xyPts[0][1]);
+      if (d > maxDisp) maxDisp = d;
+    }
+    if ((circ && circ.r < 5 || !circ) && maxDisp < 8) continue;
+
+    const frameIdxs = valid.map(([i, _]) => i);
+    const rawAngles = pts.map(p => Math.atan2(p.cy - orbitCy, p.cx - orbitCx));
+    const unwrapped = unwrapAngles(rawAngles);
+    const reg = linReg(frameIdxs, unwrapped);
+
+    let dirResult = null;
+    let confidence = 0;
+    if (Math.abs(reg.slope) > 0.005 && reg.r2 > 0.45) {
+      dirResult = reg.slope > 0 ? 'CCW' : 'CW';
+      confidence = reg.r2;
+    } else {
+      const vote = shoelaceDir(xyPts);
+      if (vote && vote.dominance > 0.75) {
+        dirResult = vote.dir;
+        confidence = vote.dominance * 0.5;
+      }
+    }
+
+    if (!dirResult) continue;
+    classified.push({
+      ti, dir: dirResult, confidence, r2: reg.r2,
+      validFrames: valid.length,
+      clickCx: seeds[ti].cx, clickCy: seeds[ti].cy
+    });
+  }
+
+  if (classified.length < 2) {
+    return { answer: null, reason: `only ${classified.length} classified` };
+  }
+
+  let cw = classified.filter(c => c.dir === 'CW');
+  let ccw = classified.filter(c => c.dir === 'CCW');
+
+  if (!cw.length || !ccw.length) {
+    const presentDir = cw.length ? 'CW' : 'CCW';
+    const oppositeDir = presentDir === 'CW' ? 'CCW' : 'CW';
+    const inSet = new Set(classified.map(c => c.ti));
+
+    for (let ti = 0; ti < tracks.length; ti++) {
+      if (inSet.has(ti)) continue;
+      const track = tracks[ti];
+      const valid = track.map((p, i) => [i, p]).filter(([_, p]) => p !== null);
+      if (valid.length < 4) continue;
+      const xyPts = valid.map(([_, p]) => [p.cx, p.cy]);
+      let maxDisp = 0;
+      for (const p of xyPts) {
+        const d = Math.hypot(p[0] - xyPts[0][0], p[1] - xyPts[0][1]);
+        if (d > maxDisp) maxDisp = d;
+      }
+      if (maxDisp < 8) continue;
+      const vote = shoelaceDir(xyPts);
+      if (!vote || vote.dominance < 0.70 || vote.dir !== oppositeDir) continue;
+      classified.push({
+        ti, dir: oppositeDir, confidence: vote.dominance * 0.4,
+        validFrames: valid.length,
+        clickCx: seeds[ti].cx, clickCy: seeds[ti].cy
+      });
+    }
+    cw = classified.filter(c => c.dir === 'CW');
+    ccw = classified.filter(c => c.dir === 'CCW');
+  }
+
+  // Deep search: if still all same direction, search for smaller blobs
+  if (!cw.length || !ccw.length) {
+    const presentDir = cw.length ? 'CW' : 'CCW';
+    const oppositeDir = presentDir === 'CW' ? 'CCW' : 'CW';
+    
+    const deepAttempts = [
+      { minSz: 4, satMult: 0.5, minR2: 0.5, minDom: 0.65 },
+      { minSz: 3, satMult: 0.3, minR2: 0.45, minDom: 0.60 },
+      { minSz: 3, satMult: 0, minR2: 0.4, minDom: 0.55 },
+    ];
+    
+    for (const attempt of deepAttempts) {
+      const deepSat = Math.max(0, satThresh * attempt.satMult);
+      const deepBlobs = findBlobs(composed[0], w, h, bgR, bgG, bgB, 22, attempt.minSz, deepSat);
+      if (deepBlobs.length <= seeds.length) continue;
+      
+      const seedSet = new Set(seeds.map(s => `${s.cx.toFixed(1)}_${s.cy.toFixed(1)}`));
+      const newSeeds = [];
+      for (const b of deepBlobs) {
+        const key = `${b.cx.toFixed(1)}_${b.cy.toFixed(1)}`;
+        if (!seedSet.has(key)) {
+          newSeeds.push(b);
+        }
+      }
+      
+      if (newSeeds.length < 1) continue;
+      
+      const deepTracks = trackBlobs(composed, w, h, bgR, bgG, bgB, newSeeds, 22, attempt.minSz, 70, deepSat);
+      
+      let found = null;
+      for (let dti = 0; dti < deepTracks.length; dti++) {
+        const track = deepTracks[dti];
+        const valid = track.map((p, i) => [i, p]).filter(([_, p]) => p !== null);
+        if (valid.length < Math.max(4, nFrames * 0.2)) continue;
+        
+        const pts = valid.map(([_, p]) => p);
+        const xyPts = pts.map(p => [p.cx, p.cy]);
+        const circ = fitCircle(xyPts);
+        const meanCx = xyPts.reduce((s, p) => s + p[0], 0) / xyPts.length;
+        const meanCy = xyPts.reduce((s, p) => s + p[1], 0) / xyPts.length;
+        const orbitCx = circ ? circ.cx : meanCx;
+        const orbitCy = circ ? circ.cy : meanCy;
+        
+        let maxDisp = 0;
+        for (const p of xyPts) {
+          const d = Math.hypot(p[0] - xyPts[0][0], p[1] - xyPts[0][1]);
+          if (d > maxDisp) maxDisp = d;
+        }
+        if ((circ && circ.r < 3 || !circ) && maxDisp < 6) continue;
+        
+        const frameIdxs = valid.map(([i, _]) => i);
+        const rawAngles = pts.map(p => Math.atan2(p.cy - orbitCy, p.cx - orbitCx));
+        const unwrapped = unwrapAngles(rawAngles);
+        const reg = linReg(frameIdxs, unwrapped);
+        
+        let dir = null, conf = 0;
+        if (Math.abs(reg.slope) > 0.005 && reg.r2 > attempt.minR2) {
+          dir = reg.slope > 0 ? 'CCW' : 'CW';
+          conf = reg.r2;
+        } else {
+          const vote = shoelaceDir(xyPts);
+          if (vote && vote.dominance > attempt.minDom) {
+            dir = vote.dir;
+            conf = vote.dominance * 0.4;
+          }
+        }
+        
+        if (dir === oppositeDir) {
+          if (!found || conf > found.confidence) {
+            found = {
+              dir, confidence: conf,
+              clickCx: newSeeds[dti].cx,
+              clickCy: newSeeds[dti].cy,
+            };
+          }
+        }
+      }
+      
+      if (found) {
+        classified.push(found);
+        cw = classified.filter(c => c.dir === 'CW');
+        ccw = classified.filter(c => c.dir === 'CCW');
+        break;
+      }
+    }
+  }
+
+  if (!cw.length || !ccw.length) {
+    return { answer: null, reason: 'all tracks same direction after recovery' };
+  }
+
+  let odd;
+  if (cw.length !== ccw.length) {
+    odd = cw.length < ccw.length ? cw : ccw;
+  } else {
+    const cwConf = cw.reduce((s, c) => s + c.confidence, 0);
+    const ccwConf = ccw.reduce((s, c) => s + c.confidence, 0);
+    odd = cwConf <= ccwConf ? cw : ccw;
+  }
+
+  if (odd.length > 1) {
+    odd = [odd.sort((a, b) => b.confidence - a.confidence)[0]];
+  }
+
+  const best = odd[0];
+  return { answer: { cx: best.clickCx, cy: best.clickCy }, confidence: best.confidence };
+}
+
+// ============ coherence Solver ============
+
+function solveCoherence(gif, composed) {
+  const { w, h } = gif;
+  const bg = detectBg(composed[0], w, h);
+  const { bgR, bgG, bgB } = bg;
+  const cell = Math.max(20, Math.min(35, Math.round(Math.sqrt(w * h) / 14)));
+
+  const attempts = [
+    { THRESH: 18, MIN_SIZE: 4, MAX_MATCH: 22, minDots: 5 },
+    { THRESH: 18, MIN_SIZE: 3, MAX_MATCH: 35, minDots: 3 },
+    { THRESH: 22, MIN_SIZE: 2, MAX_MATCH: 50, minDots: 2 },
+    { THRESH: 26, MIN_SIZE: 2, MAX_MATCH: 70, minDots: 2 },
+  ];
+
+  let allVecs = null, dotFrames = null;
+
+  for (const attempt of attempts) {
+    const dotFramesTry = [];
+    for (const rgba of composed) {
+      const blobs = findBlobs(rgba, w, h, bgR, bgG, bgB, attempt.THRESH, attempt.MIN_SIZE, 0);
+      dotFramesTry.push(blobs.map(b => [b.cx, b.cy]));
+    }
+
+    const allVecsTry = [];
+    for (const step of [1, 2]) {
+      const weight = step === 1 ? 1.0 : 0.6;
+      const matchRadius = attempt.MAX_MATCH * (step === 2 ? 1.6 : 1);
+      const mrSq = matchRadius * matchRadius;
+
+      for (let fi = 0; fi < dotFramesTry.length - step; fi++) {
+        const p0r = dotFramesTry[fi];
+        const p1r = dotFramesTry[fi + step];
+        if (p0r.length < attempt.minDots || p1r.length < attempt.minDots) continue;
+
+        for (let i = 0; i < p0r.length; i++) {
+          let bestJ = -1;
+          let bestDsq = mrSq;
+          for (let j = 0; j < p1r.length; j++) {
+            const dx = p1r[j][0] - p0r[i][0];
+            const dy = p1r[j][1] - p0r[i][1];
+            const dsq = dx * dx + dy * dy;
+            if (dsq < bestDsq) {
+              bestDsq = dsq;
+              bestJ = j;
+            }
+          }
+          if (bestJ >= 0) {
+            const vx = (p1r[bestJ][0] - p0r[i][0]) / step;
+            const vy = (p1r[bestJ][1] - p0r[i][1]) / step;
+            if (vx * vx + vy * vy < 0.25) continue;
+            allVecsTry.push([p0r[i][0], p0r[i][1], vx, vy, weight]);
+          }
+        }
+      }
+    }
+
+    if (allVecsTry.length >= 20) {
+      allVecs = allVecsTry;
+      dotFrames = dotFramesTry;
+      break;
+    }
+    if (!allVecs || allVecsTry.length > allVecs.length) {
+      allVecs = allVecsTry;
+      dotFrames = dotFramesTry;
+    }
+  }
+
+  if (!allVecs || allVecs.length < 20) {
+    return { answer: null, reason: 'too few vectors' };
+  }
+
+  const nx = Math.floor(w / cell);
+  const ny = Math.floor(h / cell);
+
+  const cmap = new Array(ny);
+  for (let by = 0; by < ny; by++) {
+    cmap[by] = new Array(nx).fill(0);
+  }
+
+  const cellVecs = {};
+  for (const v of allVecs) {
+    const [cx, cy, vx, vy, wgt] = v;
+    const bx = Math.max(0, Math.min(nx - 1, Math.floor(cx / cell)));
+    const by = Math.max(0, Math.min(ny - 1, Math.floor(cy / cell)));
+    const key = by * nx + bx;
+    if (!cellVecs[key]) cellVecs[key] = [];
+    cellVecs[key].push({ vx, vy, wgt, angle: Math.atan2(vy, vx), speed: Math.hypot(vx, vy) });
+  }
+
+  for (let by = 0; by < ny; by++) {
+    for (let bx = 0; bx < nx; bx++) {
+      const key = by * nx + bx;
+      const vecs = cellVecs[key];
+      if (!vecs || vecs.length < 6) continue;
+
+      let totW = 0, meanSpd = 0, sx = 0, cx3 = 0;
+      for (const v of vecs) {
+        totW += v.wgt;
+        meanSpd += v.speed * v.wgt;
+        sx += Math.sin(v.angle) * v.wgt;
+        cx3 += Math.cos(v.angle) * v.wgt;
+      }
+      meanSpd /= totW;
+      const cv = 1 - Math.sqrt((sx / totW) ** 2 + (cx3 / totW) ** 2);
+      cmap[by][bx] = meanSpd * (1 - cv);
+    }
+  }
+
+  const kernel = [[1, 2, 1], [2, 4, 2], [1, 2, 1]];
+  const ksum = 16;
+  const sm = new Array(ny);
+  for (let by = 0; by < ny; by++) {
+    sm[by] = new Array(nx).fill(0);
+    for (let bx = 0; bx < nx; bx++) {
+      let val = 0;
+      for (let ky = -1; ky <= 1; ky++) {
+        for (let kx = -1; kx <= 1; kx++) {
+          const y = Math.max(0, Math.min(ny - 1, by + ky));
+          const x = Math.max(0, Math.min(nx - 1, bx + kx));
+          val += cmap[y][x] * kernel[ky + 1][kx + 1];
+        }
+      }
+      sm[by][bx] = val / ksum;
+    }
+  }
+
+  for (let bx = 0; bx < nx; bx++) {
+    sm[0][bx] *= 0.6;
+    sm[ny - 1][bx] *= 0.6;
+  }
+  for (let by = 0; by < ny; by++) {
+    sm[by][0] *= 0.6;
+    sm[by][nx - 1] *= 0.6;
+  }
+
+  let bestVal = 0, bestBy = 0, bestBx = 0;
+  for (let by = 0; by < ny; by++) {
+    for (let bx = 0; bx < nx; bx++) {
+      if (sm[by][bx] > bestVal) {
+        bestVal = sm[by][bx];
+        bestBy = by;
+        bestBx = bx;
+      }
+    }
+  }
+
+  const winVecs = cellVecs[bestBy * nx + bestBx] || [];
+  let winAngle = 0;
+  if (winVecs.length) {
+    let sx = 0, cx3 = 0, ww = 0;
+    for (const v of winVecs) {
+      sx += Math.sin(v.angle) * v.wgt;
+      cx3 += Math.cos(v.angle) * v.wgt;
+      ww += v.wgt;
+    }
+    winAngle = Math.atan2(sx / ww, cx3 / ww);
+  }
+
+  const nearDots = [];
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const nbx = bestBx + dx, nby = bestBy + dy;
+      if (nbx < 0 || nbx >= nx || nby < 0 || nby >= ny) continue;
+      if (sm[nby][nbx] <= 0) continue;
+      if (!dotFrames || !dotFrames[0]) continue;
+      for (const [ddx, ddy] of dotFrames[0]) {
+        if (Math.floor(ddx / cell) === nbx && Math.floor(ddy / cell) === nby) {
+          nearDots.push([ddx, ddy, sm[nby][nbx]]);
+        }
+      }
+    }
+  }
+
+  let clickCx, clickCy;
+  if (nearDots.length) {
+    const weights = [];
+    for (const [ddx, ddy, cw2] of nearDots) {
+      let myVec = null;
+      let minDist = cell;
+      for (const v of allVecs) {
+        const d = Math.hypot(v[0] - ddx, v[1] - ddy);
+        if (d < minDist) {
+          minDist = d;
+          myVec = { angle: Math.atan2(v[3], v[2]) };
+        }
+      }
+      const align = myVec ? (0.5 + 0.5 * Math.cos(myVec.angle - winAngle)) : 0.5;
+      weights.push(cw2 * align);
+    }
+    const wSum = weights.reduce((s, w) => s + w, 0) || 1;
+    clickCx = nearDots.reduce((s, d, i) => s + d[0] * weights[i], 0) / wSum;
+    clickCy = nearDots.reduce((s, d, i) => s + d[1] * weights[i], 0) / wSum;
+  } else {
+    clickCx = (bestBx + 0.5) * cell;
+    clickCy = (bestBy + 0.5) * cell;
+  }
+
+  return { answer: { cx: clickCx, cy: clickCy }, confidence: Math.min(1, bestVal / 5) };
+}
+
+// ============ Main Solve Function ============
+
+async function solveCaptcha(fetchFn = fetch) {
+  try {
+    const challengeResp = await fetchFn('https://captcha.platorelay.com/api/challenge', {
+      headers: {
+        'Accept': 'application/json',
+        'Origin': 'https://auth.platorelay.com',
+        'Referer': 'https://auth.platorelay.com/',
+      }
+    });
+    const challenge = await challengeResp.json();
+    const chalid = challenge.challenge_id;
+    const ctype = challenge.type || 'driftodd';
+    const imgUrl = 'https://captcha.platorelay.com' + challenge.image;
+
+    const imgResp = await fetchFn(imgUrl, {
+      headers: {
+        'Accept': 'image/gif,image/*;q=0.9,*/*;q=0.8',
+        'Origin': 'https://auth.platorelay.com',
+        'Referer': 'https://auth.platorelay.com/',
+      }
+    });
+    const gifBuffer = await imgResp.arrayBuffer();
+
+    const gif = parseGIF(gifBuffer);
+    const composed = compositeFrames(gif);
+
+    let result;
+    if (ctype === 'driftodd') {
+      result = solveDriftodd(gif, composed);
+    } else if (ctype === 'coherence') {
+      result = solveCoherence(gif, composed);
+    } else {
+      result = solveDriftodd(gif, composed);
+      if (!result.answer) {
+        result = solveCoherence(gif, composed);
+      }
+    }
+
+    if (!result.answer) {
+      return { success: false, error: result.reason || 'solve failed' };
+    }
+
+    const answerResp = await fetchFn('https://captcha.platorelay.com/api/answer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'Origin': 'https://auth.platorelay.com',
+        'Referer': 'https://auth.platorelay.com/',
+      },
+      body: JSON.stringify({
+        challenge_id: chalid,
+        x: result.answer.cx,
+        y: result.answer.cy,
+      }),
+    });
+    const answer = await answerResp.json();
+
+    if (answer.success && answer.token) {
+      return { success: true, token: answer.token };
+    }
+    return { success: false, error: 'answer rejected' };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+async function solveCaptchaMulti(maxAttempts = 8) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await solveCaptcha();
+    if (result.success) return result.token;
+  }
+  return null;
+}
+
+// Universal export - works in both Node.js and browser
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { solveCaptcha, solveCaptchaMulti, solveDriftodd, solveCoherence, parseGIF, compositeFrames };
+} else if (typeof window !== 'undefined') {
+  window.solveCaptcha = solveCaptcha;
+  window.solveCaptchaMulti = solveCaptchaMulti;
+  window.solveDriftodd = solveDriftodd;
+  window.solveCoherence = solveCoherence;
+  window.parseGIF = parseGIF;
+  window.compositeFrames = compositeFrames;
+}
