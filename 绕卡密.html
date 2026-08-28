@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlatoRelay 绕过工具</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%);min-height:100vh;color:#fff;display:flex;align-items:center;justify-content:center;padding:20px}
+.container{width:100%;max-width:640px}
+.card{background:rgba(255,255,255,.08);backdrop-filter:blur(20px);border-radius:24px;padding:40px;border:1px solid rgba(255,255,255,.1);box-shadow:0 25px 50px -12px rgba(0,0,0,.5)}
+.header{text-align:center;margin-bottom:32px}
+.logo{width:64px;height:64px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:32px;margin:0 auto 16px;box-shadow:0 10px 30px rgba(102,126,234,.4)}
+h1{font-size:28px;font-weight:700;margin-bottom:8px;background:linear-gradient(135deg,#fff 0%,#a5b4fc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.subtitle{color:rgba(255,255,255,.6);font-size:14px}
+.badge{display:inline-block;padding:4px 12px;background:rgba(74,222,128,.15);border:1px solid rgba(74,222,128,.3);border-radius:20px;font-size:12px;color:#4ade80;margin-top:8px}
+.input-section{margin-bottom:24px}
+.input-label{display:block;font-size:14px;font-weight:500;margin-bottom:10px;color:rgba(255,255,255,.8)}
+.input-wrapper{position:relative}
+.url-input{width:100%;padding:16px 80px 16px 48px;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.1);border-radius:12px;color:#fff;font-size:15px;font-family:inherit;transition:all .3s ease;outline:0}
+.url-input::placeholder{color:rgba(255,255,255,.4)}
+.url-input:focus{border-color:#667eea;background:rgba(255,255,255,.1);box-shadow:0 0 0 4px rgba(102,126,234,.2)}
+.input-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:rgba(255,255,255,.5);font-size:18px}
+.paste-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);padding:8px 14px;background:rgba(255,255,255,.1);border:none;border-radius:8px;color:rgba(255,255,255,.8);font-size:13px;cursor:pointer;transition:all .2s ease;font-family:inherit}
+.paste-btn:hover{background:rgba(255,255,255,.2)}
+.bypass-btn{width:100%;padding:16px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);border:none;border-radius:12px;color:#fff;font-size:16px;font-weight:600;cursor:pointer;transition:all .3s ease;font-family:inherit;position:relative;overflow:hidden}
+.bypass-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 10px 30px rgba(102,126,234,.5)}
+.bypass-btn:disabled{opacity:.6;cursor:not-allowed}
+.btn-loading{display:none}
+.bypass-btn.loading .btn-text{display:none}
+.bypass-btn.loading .btn-loading{display:inline-flex;align-items:center;gap:8px}
+.spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.result-section{margin-top:24px;display:none}
+.result-section.show{display:block;animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.result-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:20px}
+.result-card.success{border-color:rgba(74,222,128,.3);background:rgba(74,222,128,.08)}
+.result-card.error{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.08)}
+.result-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.result-icon{font-size:24px}
+.result-title{font-weight:600;font-size:16px}
+.result-content{padding:14px;background:rgba(0,0,0,.2);border-radius:8px;font-family:'SF Mono',Monaco,'Cascadia Code',monospace;font-size:14px;word-break:break-all;line-height:1.6;margin-bottom:12px;user-select:all}
+.time-info{display:none;margin-bottom:12px;padding:10px 14px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:8px;font-size:13px;color:#fbbf24;text-align:center}
+.time-info.show{display:block}
+.copy-btn{width:100%;padding:10px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;font-size:14px;cursor:pointer;transition:all .2s ease;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px}
+.copy-btn:hover{background:rgba(255,255,255,.2)}
+.copy-btn.copied{background:rgba(74,222,128,.2);border-color:rgba(74,222,128,.4)}
+.log-section{margin-top:20px;display:none;max-height:200px;overflow-y:auto;background:rgba(0,0,0,.3);border-radius:8px;padding:12px;font-family:'SF Mono',Monaco,monospace;font-size:12px;line-height:1.6;color:rgba(255,255,255,.7)}
+.log-section.show{display:block}
+.log-entry{margin-bottom:2px}
+.log-entry.info{color:#a5b4fc}
+.log-entry.success{color:#4ade80}
+.log-entry.error{color:#f87171}
+.log-entry.warn{color:#fbbf24}
+.disclaimer{margin-top:24px;padding:16px;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);border-radius:12px;font-size:13px;color:rgba(251,191,36,.9);line-height:1.6}
+.disclaimer strong{color:#fbbf24}
+.footer{text-align:center;margin-top:24px;font-size:12px;color:rgba(255,255,255,.4)}
+@media(max-width:480px){.card{padding:28px 20px}h1{font-size:22px}.url-input{padding:14px 70px 14px 44px;font-size:14px}}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="card">
+<div class="header">
+<div class="logo">🚀</div>
+<h1>PlatoRelay 绕过工具</h1>
+<p class="subtitle">纯前端版 · 无需服务器 · 支持绕过新链接</p>
+<div class="badge">✅ 纯前端运行 · 可部署 GitHub Pages</div>
+</div>
+<div class="input-section">
+<label class="input-label">输入 PlatoRelay 链接</label>
+<div class="input-wrapper">
+<span class="input-icon">🔗</span>
+<input type="text" class="url-input" id="urlInput" placeholder="https://auth.platorelay.com/a?d=...">
+<button class="paste-btn" id="pasteBtn">粘贴</button>
+</div>
+</div>
+<button class="bypass-btn" id="bypassBtn">
+<span class="btn-text">✨ 开始绕过</span>
+<span class="btn-loading"><span class="spinner"></span>正在绕过...</span>
+</button>
+<div class="log-section" id="logSection"></div>
+<div class="result-section" id="resultSection">
+<div class="result-card" id="resultCard">
+<div class="result-header">
+<span class="result-icon" id="resultIcon">✅</span>
+<span class="result-title" id="resultTitle">绕过成功！</span>
+</div>
+<div class="result-content" id="resultContent">FREE_xxx</div>
+<div class="time-info" id="timeInfo">⏱️ 剩余时间: --</div>
+<button class="copy-btn" id="copyBtn"><span id="copyText">📋 复制密钥</span></button>
+</div>
+</div>
+<div class="disclaimer">
+<strong>⚠️ 说明：</strong>纯前端版直接调用 PlatoRelay API + 外部验证码服务 + loot 绕过服务，所有 API 均已开放 CORS。无需任何后端服务器，可直接部署到 GitHub Pages。
+</div>
+<div class="footer">纯前端版 · PlatoRelay 专用 · 无需服务器</div>
+</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const urlInput=$('urlInput'),pasteBtn=$('pasteBtn'),bypassBtn=$('bypassBtn');
+const resultSection=$('resultSection'),resultCard=$('resultCard');
+const resultIcon=$('resultIcon'),resultTitle=$('resultTitle'),resultContent=$('resultContent');
+const copyBtn=$('copyBtn'),copyText=$('copyText'),timeInfo=$('timeInfo');
+const logSection=$('logSection');
+let currentKey='';
+function log(msg,type='info'){const entry=document.createElement('div');entry.className='log-entry '+type;entry.textContent='['+new Date().toLocaleTimeString()+'] '+msg;logSection.appendChild(entry);logSection.scrollTop=logSection.scrollHeight}
+function getParam(url,param){try{const u=new URL(url);return u.searchParams.get(param)}catch(e){return null}}
+function randInt(min,max){return Math.floor(Math.random()*(max-min+1))+min}
+function randChoice(arr){return arr[Math.floor(Math.random()*arr.length)]}
+async function aesCTREncrypt(keyStr,ivStr,payload){
+  const keyBytes=new Uint8Array(keyStr.split('').map(c=>c.charCodeAt(0)));
+  const ivBytes=new Uint8Array(ivStr.split('').map(c=>c.charCodeAt(0)));
+  const data=new TextEncoder().encode(payload);
+  const cryptoKey=await crypto.subtle.importKey('raw',keyBytes,{name:'AES-CTR'},false,['encrypt']);
+  const encrypted=await crypto.subtle.encrypt({name:'AES-CTR',counter:ivBytes,length:128},cryptoKey,data);
+  return[...new Uint8Array(encrypted)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+const CHROME_VERSIONS=[120,123,124,131,136,142];
+const SCREEN_RES=['1920x1080','1366x768','1536x864','1440x900','1280x720','1600x900','2560x1440'];
+const PLATFORMS={
+  Windows:{ua:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',nav:'Win32',sec:'"Windows"'},
+  Linux:{ua:'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',nav:'Linux x86_64',sec:'"Linux"'},
+  macOS:{ua:'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{v}.0.0.0 Safari/537.36',nav:'MacIntel',sec:'"macOS"'}
+};
+const LANGUAGES=['en-US,en;q=0.9','en-GB,en;q=0.8','en-US,en;q=0.9,es;q=0.7'];
+function randomFingerprint(){
+  const platName=randChoice(['Windows','Windows','Windows','Windows','Windows','macOS','Linux']);
+  const plat=PLATFORMS[platName];
+  const v=randChoice(CHROME_VERSIONS);
+  const res=randChoice(SCREEN_RES);
+  return{userAgent:plat.ua.replace('{v}',v),platform:platName,navigatorPlatform:plat.nav,secChUaPlatform:plat.sec,language:randChoice(LANGUAGES),resolution:res,chromeVersion:v};
+}
+async function generateMeta(ticket,fp){
+  const res=fp.resolution.split('x');
+  const sw=parseInt(res[0]),sh=parseInt(res[1]);
+  const availH=sh-randChoice([40,48,32,23]);
+  const plugins=[{"name":"PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"Chrome PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"Chromium PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"Microsoft Edge PDF Viewer","filename":"internal-pdf-viewer","description":"Portable Document Format"},{"name":"WebKit built-in PDF","filename":"internal-pdf-viewer","description":"Portable Document Format"}];
+  const mimetypes=[{"type":"application/pdf","description":"Portable Document Format","suffixes":"pdf"},{"type":"text/pdf","description":"Portable Document Format","suffixes":"pdf"}];
+  const conn=randChoice([{"effectiveType":"4g","downlink":10,"rtt":50},{"effectiveType":"4g","downlink":5,"rtt":75},{"effectiveType":"4g","downlink":2.5,"rtt":100}]);
+  const histLen=randChoice([1,2,3,4]);
+  const info=[{"name":"screen","data":{"width":sw,"height":sh,"availWidth":sw,"availHeight":availH,"colorDepth":24,"pixelDepth":24,"orientation":{"type":"landscape-primary","angle":0}}},{"name":"navigator","data":{"userAgent":fp.userAgent,"platform":fp.navigatorPlatform,"maxTouchPoints":0,"plugins":{"length":plugins.length,"item":plugins},"mimeTypes":{"length":mimetypes.length,"item":mimetypes}}},{"name":"performance","data":Date.now()},{"name":"history","data":{"length":histLen}},{"name":"webdriver","webdriver":false},{"name":"connection","data":Object.assign({},conn,{saveData:false})}];
+  const payload=JSON.stringify({browserInfo:info});
+  return await aesCTREncrypt(ticket.substring(0,16),ticket.substring(16,32),payload);
+}
+async function generateStream(ticket,sw,sh){
+  const now=Date.now();
+  const events=[];
+  function ev(typ,x,y,tag,t){events.push({"event":typ,"data":{"x":Math.max(0,Math.min(sw,Math.round(x))),"y":Math.max(0,Math.min(sh,Math.round(y))),"target":tag,"time":Math.round(t)}})}
+  const btnX=Math.round(sw*0.50)+randInt(-70,70);
+  const btnY=Math.round(sh*0.44)+randInt(-50,50);
+  let t=now-randInt(5000,14000);
+  const cx=randInt(Math.round(sw*0.10),Math.round(sw*0.90));
+  const cy=randInt(Math.round(sh*0.10),Math.round(sh*0.75));
+  for(let i=0;i<randInt(2,5);i++){t+=randInt(180,1400);ev(0,cx+randInt(-280,280),cy+randInt(-180,180),randChoice(['BODY','DIV','P','H1','H2','SPAN']),t)}
+  for(let i=0;i<randInt(2,4);i++){t+=randInt(50,320);ev(0,btnX+randInt(-6,6),btnY+randInt(-6,6),'BUTTON',t)}
+  t+=randInt(140,700);
+  ev(1,btnX+randInt(-3,3),btnY+randInt(-3,3),'BUTTON',t);
+  ev(0,btnX+randInt(-6,6),btnY+randInt(-6,6),'BUTTON',t-randInt(14,55));
+  events.push({"event":5,"data":{"time":now,"length":0}});
+  const payload=JSON.stringify({events:events});
+  return await aesCTREncrypt(ticket.substring(1,17),ticket.substring(17,33),payload);
+}
+async function checkKey(ticket){
+  try{
+    const resp=await fetch('https://auth.platorelay.com/api/session/status?ticket='+encodeURIComponent(ticket));
+    const data=await resp.json();
+    if(data.success&&data.data){
+      const key=data.data.key;
+      const minutes=data.data.minutesLeft||0;
+      if(key&&key!=='KEY_NOT_FOUND')return{key:key,minutes:minutes}
+    }
+    return null
+  }catch(e){return null}
+}
+async function getMetadata(ticket){
+  for(let i=0;i<3;i++){
+    try{
+      const resp=await fetch('https://auth.platorelay.com/api/session/metadata?ticket='+encodeURIComponent(ticket));
+      const data=await resp.json();
+      if(data.success)return data.data||{};
+      return null
+    }catch(e){await new Promise(r=>setTimeout(r,300))}
+  }
+  return null
+}
+async function solveCaptchaExternal(){
+  for(let i=0;i<37;i++){
+    try{
+      const resp=await fetch('https://tirex-delta.vercel.app/api/solve');
+      const data=await resp.json();
+      if(data.success&&data.token)return data.token
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,500))
+  }
+  return null
+}
+async function bypassLoot(lootUrl){
+  const apiKey='TRW_FREE-GAY-15a92945-9b04-4c75-8337-f2a6007281e9';
+  const url='https://trw.lat/api/bypass?apikey='+apiKey+'&mode=stream&url='+encodeURIComponent(lootUrl);
+  try{
+    const resp=await fetch(url);
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder();
+    let buffer='';
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n');
+      buffer=lines.pop()||'';
+      for(const line of lines){
+        const trimmed=line.trim();
+        if(!trimmed.startsWith('data:'))continue;
+        try{
+          const evt=JSON.parse(trimmed.substring(5).trim());
+          if(evt.success&&evt.result)return evt.result;
+          if(evt.status&&!['started','processing',null].includes(evt.status))break
+        }catch(e){}
+      }
+    }
+  }catch(e){log('Loot bypass error: '+e.message,'error')}
+  return null
+}
+async function stepPut(ticket,service,hashParam,captcha,meta,stream){
+  let stepUrl='https://auth.platorelay.com/api/session/step?ticket='+encodeURIComponent(ticket)+'&service='+service;
+  if(hashParam)stepUrl+='&hash='+hashParam;
+  const payload={captcha:captcha,meta:meta,stream:stream,resolved:true};
+  const resp=await fetch(stepUrl,{method:'PUT',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});
+  return await resp.json()
+}
+async function bypassPlatoRelay(url){
+  logSection.innerHTML='';
+  logSection.classList.add('show');
+  resultSection.classList.remove('show');
+  timeInfo.classList.remove('show');
+  const ticket=getParam(url,'d')||getParam(url,'ticket');
+  if(!ticket)throw new Error('无法从链接提取 ticket');
+  const hashParam=getParam(url,'hash');
+  const fp=randomFingerprint();
+  const res=fp.resolution.split('x');
+  const sw=parseInt(res[0]),sh=parseInt(res[1]);
+  log('Ticket: '+ticket.substring(0,20)+'...','info');
+  log('指纹: '+fp.platform+' Chrome/'+fp.chromeVersion,'info');
+  log('检查密钥状态...','info');
+  const existing=await checkKey(ticket);
+  if(existing){log('密钥已存在！','success');return{key:existing.key,minutes:existing.minutes}}
+  log('获取元数据...','info');
+  let meta=await getMetadata(ticket);
+  if(!meta)throw new Error('获取元数据失败');
+  let currentTicket=ticket;
+  let currentHash=hashParam;
+  const completed=meta.completed||0;
+  const total=(meta.activeRevenueProfile||{}).checkpointCount||0;
+  log('检查点: '+completed+'/'+total,'info');
+  for(let round=0;round<20;round++){
+    log('--- 第 '+(round+1)+' 轮 ---','info');
+    meta=await getMetadata(currentTicket);
+    if(!meta){log('元数据获取失败','error');continue}
+    const comp=meta.completed||0;
+    const tot=(meta.activeRevenueProfile||{}).checkpointCount||0;
+    const etOn=meta.enableEventTracker||false;
+    const serviceBits=((meta.activeRevenueProfile||{}).service)||0;
+    let svc=1;
+    if(serviceBits&1)svc=1;else if(serviceBits&2)svc=2;else if(serviceBits&4)svc=4;
+    log('检查点: '+comp+'/'+tot,'info');
+    if(comp>=tot){log('所有检查点完成！','success');break}
+    const metaEnc=await generateMeta(currentTicket,fp);
+    const streamEnc=etOn?await generateStream(currentTicket,sw,sh):'';
+    log('尝试提交步骤...','info');
+    let stepResp=await stepPut(currentTicket,svc,currentHash,null,metaEnc,streamEnc);
+    let lootUrl=(stepResp.data||{}).url;
+    if(!lootUrl){
+      log('需要验证码，正在获取...','warn');
+      const captcha=await solveCaptchaExternal();
+      if(!captcha){log('验证码获取失败，重试...','error');continue}
+      log('验证码: '+captcha.substring(0,20)+'...','success');
+      const metaEnc2=await generateMeta(currentTicket,fp);
+      const streamEnc2=etOn?await generateStream(currentTicket,sw,sh):'';
+      stepResp=await stepPut(currentTicket,svc,currentHash,captcha,metaEnc2,streamEnc2);
+      lootUrl=(stepResp.data||{}).url
+    }
+    if(!lootUrl){
+      log('步骤返回无URL','warn');
+      const check=await checkKey(currentTicket);
+      if(check){log('密钥已生成！','success');return{key:check.key,minutes:check.minutes}}
+      await new Promise(r=>setTimeout(r,500));continue
+    }
+    log('获得广告链接: '+lootUrl.substring(0,50)+'...','info');
+    log('绕过广告链接...','info');
+    const result=await bypassLoot(lootUrl);
+    if(!result){log('广告绕过失败，重试...','error');continue}
+    log('广告绕过成功: '+result.substring(0,50)+'...','success');
+    const newTicket=getParam(result,'d')||getParam(result,'ticket');
+    if(newTicket){currentTicket=newTicket;currentHash=getParam(result,'hash');log('更新 ticket','info')}
+    try{await Promise.allSettled([fetch(lootUrl,{mode:'no-cors'}).catch(()=>{}),fetch(result,{mode:'no-cors'}).catch(()=>{})])}catch(e){}
+    await new Promise(r=>setTimeout(r,200))
+  }
+  log('解锁中...','info');
+  meta=await getMetadata(currentTicket)||{};
+  const etOn2=meta.enableEventTracker||false;
+  const metaEnc3=await generateMeta(currentTicket,fp);
+  const streamEnc3=etOn2?await generateStream(currentTicket,sw,sh):'';
+  try{await stepPut(currentTicket,1,currentHash,null,metaEnc3,streamEnc3)}catch(e){log('解锁请求错误','warn')}
+  await new Promise(r=>setTimeout(r,200));
+  log('获取密钥...','info');
+  const finalResult=await checkKey(currentTicket);
+  if(finalResult){log('绕过成功！','success');return{key:finalResult.key,minutes:finalResult.minutes}}
+  throw new Error('绕过失败，密钥未找到。可能需要重试。')
+}
+pasteBtn.addEventListener('click',async()=>{try{urlInput.value=await navigator.clipboard.readText();urlInput.focus()}catch(e){alert('无法访问剪贴板，请手动粘贴')}});
+copyBtn.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(currentKey);copyBtn.classList.add('copied');copyText.textContent='✅ 已复制！';setTimeout(()=>{copyBtn.classList.remove('copied');copyText.textContent='📋 复制密钥'},2000)}catch(e){alert('复制失败，请手动复制')}});
+bypassBtn.addEventListener('click',async()=>{
+  const url=urlInput.value.trim();
+  if(!url){showResult('error','❌','请输入链接','请先输入 PlatoRelay 链接地址');return}
+  if(!url.includes('platorelay.com')&&!url.includes('platoboost.com')){showResult('error','❌','不支持的链接','此工具仅支持 platorelay.com 链接');return}
+  bypassBtn.classList.add('loading');bypassBtn.disabled=true;resultSection.classList.remove('show');
+  try{
+    const result=await bypassPlatoRelay(url);
+    if(result.key){currentKey=result.key;showResult('success','✅','绕过成功！',result.key);if(result.minutes>0){const h=Math.floor(result.minutes/60);const m=result.minutes%60;timeInfo.textContent='⏱️ 剩余时间: '+h+'小时'+m+'分钟';timeInfo.classList.add('show')}}
+    else{showResult('error','❌','绕过失败','密钥未找到')}
+  }catch(e){log(e.message,'error');showResult('error','❌','绕过失败',e.message)}
+  finally{bypassBtn.classList.remove('loading');bypassBtn.disabled=false}
+});
+function showResult(type,icon,title,content){resultCard.className='result-card '+type;resultIcon.textContent=icon;resultTitle.textContent=title;resultContent.textContent=content;resultSection.classList.add('show');copyBtn.style.display=type==='error'?'none':'flex'}
+urlInput.addEventListener('keypress',e=>{if(e.key==='Enter')bypassBtn.click()});
+</script>
+</body>
+</html>
