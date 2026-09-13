@@ -1,0 +1,370 @@
+--[[
+    AC_BYPASS_v2.lua
+    One-shot AC bypass orchestrator
+    Order: Physical -> Attribute -> Remote
+    Failover: probe -> if server-authority, escalate layer
+    Anti-AC: jittered throttle, single-write, no batch AttributeChanged
+]]--
+
+-- ============================================================
+-- [0] ENV PREP
+-- ============================================================
+local Players        = game:GetService("Players")
+local RunService     = game:GetService("RunService")
+local LP             = Players.LocalPlayer
+local CHAR           = LP.Character or LP.CharacterAdded:Wait()
+local HRP            = CHAR:WaitForChild("HumanoidRootPart")
+local HUM            = CHAR:WaitForChild("Humanoid")
+
+-- executor shims (兼容常见执行器)
+local rawget        = rawget or getrawmetatable and getrawmetatable(game).__index
+local rawset        = rawset
+local getmt         = getrawmetatable or function() return getmetatable(game) end
+local setro         = setreadonly or make_writeable
+local checkcaller   = checkcaller or function() return false end
+local hookfunc      = hookfunction or function(a,b) return a end
+local identifyexec  = identifyexecutor or function() return "unknown" end
+local setthread     = setidentity or setthreadidentity or function() end
+local firepp        = fireproximityprompt or fireprompt
+local islclosure    = islclosure or function(f) return not iscclosure(f) end
+
+local LOG = {}
+local function log(tag, fmt, ...)
+    local s = string.format("[%s] "..fmt, tag, ...)
+    table.insert(LOG, s)
+    print(s)
+end
+
+-- ============================================================
+-- [1] ANTI-AC FOUNDATION
+-- ============================================================
+-- 1.1 Namecall hook: 透传 + 采样 (不修改行为, 只观察)
+local mt = getmt(game)
+local orig_namecall = mt.__namecall
+local orig_index    = mt.__index
+local orig_newindex = mt.__newindex
+
+setro(mt, false)
+
+-- 采样表: 记录高频被 AC 探测的调用
+local namecall_sink = {}
+local hook_active = true
+
+mt.__namecall = newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    if hook_active then
+        namecall_sink[method] = (namecall_sink[method] or 0) + 1
+    end
+    return orig_namecall(self, ...)
+end)
+
+-- 1.2 Index hook: 防止 executor 被指纹 (只读透传)
+mt.__index = newcclosure(function(self, key)
+    return orig_index(self, key)
+end)
+
+-- 1.3 Newindex hook: 记录所有属性写入 (用于回滚检测)
+local write_log = {}
+mt.__newindex = newcclosure(function(self, key, value)
+    if hook_active and typeof(self) == "Instance" then
+        table.insert(write_log, {inst = self, key = key, val = value, t = os.clock()})
+        if #write_log > 512 then table.remove(write_log, 1) end
+    end
+    return orig_newindex(self, key, value)
+end)
+
+setro(mt, true)
+log("ENV", "executor=%s  hooked namecall/index/newindex", identifyexec())
+
+-- ============================================================
+-- [2] JITTERED THROTTLE
+-- ============================================================
+-- AC 常用检测: 单位时间 AttributeChanged / Remote 调用频率
+-- 对策: 随机延迟 + 分散写入
+local function jitter(min_v, max_v)
+    task.wait(min_v + math.random() * (max_v - min_v))
+end
+
+local function safe_set_attr(inst, name, value, verify_wait)
+    if not inst or not inst.Parent then return false end
+    local orig = inst:GetAttribute(name)
+    if orig == value then return true end
+    inst:SetAttribute(name, value)
+    jitter(0.05, 0.25)  -- 分散写入
+    if verify_wait then
+        jitter(verify_wait, verify_wait + 0.3)
+        return inst:GetAttribute(name) == value
+    end
+    return true
+end
+
+-- ============================================================
+-- [3] AUTHORITY PROBE (自动降级核心)
+-- ============================================================
+-- 对目标属性写入 sentinel, 观察是否被服务端覆写
+local function probe_authority(inst, attr)
+    if not inst then return "MISSING" end
+    local orig = inst:GetAttribute(attr)
+    if orig == nil then return "NO_ATTR" end
+
+    -- 构造与原始值不同的 sentinel
+    local sentinel
+    local t = typeof(orig)
+    if t == "boolean" then
+        sentinel = not orig
+    elseif t == "number" then
+        sentinel = orig + 12345
+    elseif t == "string" then
+        sentinel = "__PROBE__"..orig
+    else
+        return "UNSUPPORTED"
+    end
+
+    local ok = pcall(function() inst:SetAttribute(attr, sentinel) end)
+    if not ok then return "READONLY" end
+
+    task.wait(0.4)
+    local after = inst:GetAttribute(attr)
+    if after == sentinel then
+        -- 客户端权威, 尝试恢复原值
+        pcall(function() inst:SetAttribute(attr, orig) end)
+        return "CLIENT"
+    else
+        return "SERVER"
+    end
+end
+
+-- ============================================================
+-- [4] TARGET DISCOVERY
+-- ============================================================
+local function find_first(class, name)
+    for _, d in ipairs(game:GetDescendants()) do
+        if d:IsA(class) and d.Name == name then return d end
+    end
+    return nil
+end
+
+local function collect_where(pred)
+    local out = {}
+    for _, d in ipairs(game:GetDescendants()) do
+        if pred(d) then table.insert(out, d) end
+    end
+    return out
+end
+
+local targets = {
+    elevator   = find_first("Folder", "ElevatorMain"),
+    doors      = collect_where(function(d) return d:GetAttribute("DoorState") ~= nil end),
+    contraband = collect_where(function(d) return d:GetAttribute("ContrabandID") ~= nil end),
+    vendors    = collect_where(function(d) return d:GetAttribute("Stock") ~= nil end),
+    prompts    = collect_where(function(d) return d:IsA("ProximityPrompt") end),
+}
+
+log("SCAN", "elevator=%s  doors=%d  contraband=%d  vendors=%d  prompts=%d",
+    tostring(targets.elevator ~= nil),
+    #targets.doors, #targets.contraband, #targets.vendors, #targets.prompts)
+
+-- ============================================================
+-- [5] LAYER 1: PHYSICAL (无声, AC 最难检测)
+-- ============================================================
+local function layer_physical()
+    local n_doors, n_coll = 0, 0
+
+    for _, d in ipairs(targets.doors) do
+        -- 收集门内所有碰撞 Part
+        local parts = {}
+        for _, p in ipairs(d:GetDescendants()) do
+            if p:IsA("BasePart") and (p.Name == "CollPart" or p.Name == "Strip"
+                or p.Name == "Root" or p.Name == "Glass") then
+                table.insert(parts, p)
+            end
+        end
+        for _, p in ipairs(parts) do
+            pcall(function()
+                p.CanCollide = false
+                p.CanTouch   = false
+                p.CanQuery   = false
+            end)
+            n_coll = n_coll + 1
+            jitter(0.005, 0.02)
+        end
+        n_doors = n_doors + 1
+    end
+
+    -- Elevator PlayerRegion 穿透
+    if targets.elevator then
+        for _, p in ipairs(targets.elevator:GetDescendants()) do
+            if p:IsA("BasePart") and (p.Name == "PlayerRegion" or p.Name == "Block") then
+                pcall(function() p.CanCollide = false end)
+            end
+        end
+    end
+
+    log("L1", "physical: doors=%d  colls_disabled=%d", n_doors, n_coll)
+    return n_coll > 0
+end
+
+-- ============================================================
+-- [6] LAYER 2: ATTRIBUTE (仅在 CLIENT-AUTHORITY 下生效)
+-- ============================================================
+local function layer_attribute()
+    local results = {}
+
+    -- 6.1 Elevator
+    if targets.elevator then
+        local auth = probe_authority(targets.elevator, "FloorName")
+        results.elev_FloorName = auth
+        if auth == "CLIENT" then
+            safe_set_attr(targets.elevator, "IsMoving", false, 0.3)
+            log("L2", "elevator: CLIENT-authority, FloorName writable")
+        else
+            log("L2", "elevator: %s-authority, skip attrs", auth)
+        end
+    end
+
+    -- 6.2 Doors (抽样 3 个探测, 避免全量写触发 AC)
+    local sample = {}
+    for i = 1, math.min(3, #targets.doors) do
+        sample[i] = targets.doors[i]
+    end
+    local client_doors = 0
+    for _, d in ipairs(sample) do
+        local auth = probe_authority(d, "DoorState")
+        if auth == "CLIENT" then client_doors = client_doors + 1 end
+        jitter(0.3, 0.7)
+    end
+    results.door_auth = client_doors > 0 and "CLIENT" or "SERVER"
+
+    if client_doors > 0 then
+        for _, d in ipairs(targets.doors) do
+            safe_set_attr(d, "DoorState", "Open", 0)
+            safe_set_attr(d, "BlockECM", false, 0)
+            jitter(0.02, 0.08)
+        end
+        log("L2", "doors: %d/%d sampled CLIENT -> wrote all", client_doors, #sample)
+    else
+        log("L2", "doors: SERVER-authority -> L1 physical fallback holds")
+    end
+
+    -- 6.3 Contraband
+    local vis_ok = 0
+    for _, v in ipairs(targets.contraband) do
+        local auth = probe_authority(v, "Visible")
+        if auth == "CLIENT" then
+            safe_set_attr(v, "Visible", true, 0)
+            safe_set_attr(v, "VisibleAt", 0, 0)
+            if v:IsA("BasePart") then
+                pcall(function()
+                    v.Transparency = 0
+                    v.CanCollide   = true
+                    v.CanQuery     = true
+                end)
+            end
+            vis_ok = vis_ok + 1
+        end
+        jitter(0.1, 0.3)
+    end
+    results.contraband = vis_ok
+    log("L2", "contraband: %d/%d forced visible", vis_ok, #targets.contraband)
+
+    -- 6.4 Vendors
+    local vendor_ok = 0
+    for _, v in ipairs(targets.vendors) do
+        if v:GetAttribute("Stock") and v:GetAttribute("Stock") < 99999 then
+            if safe_set_attr(v, "Stock", 99999, 0.3) then
+                vendor_ok = vendor_ok + 1
+            end
+        else
+            vendor_ok = vendor_ok + 1  -- 已经是 99999
+        end
+        jitter(0.05, 0.15)
+    end
+    results.vendors = vendor_ok
+
+    return results
+end
+
+-- ============================================================
+-- [7] LAYER 3: PROMPT + REMOTE (需真实距离)
+-- ============================================================
+local function layer_prompt()
+    -- 7.1 本地 Prompt 增强 (视觉 + 距离)
+    local n = 0
+    for _, p in ipairs(targets.prompts) do
+        pcall(function()
+            p.Enabled = true
+            if p.MaxActivationDistance < 30 then
+                p.MaxActivationDistance = 30
+            end
+            p.HoldDuration = 0
+        end)
+        n = n + 1
+        jitter(0.003, 0.01)
+    end
+    log("L3", "prompts: %d enhanced (local only; server distance still enforced)", n)
+
+    -- 7.2 传送 + 触发 (仅对显式启用的目标)
+    -- 默认: 不自动触发, 暴露 API 供手动调用
+    _G.ACB = _G.ACB or {}
+    _G.ACB.trigger_prompt = function(prompt)
+        if not prompt or not prompt.Parent then return false end
+        local target_cf = prompt.Parent:IsA("BasePart") and prompt.Parent.CFrame
+            or (prompt.Parent:FindFirstChildWhichIsA("BasePart") and prompt.Parent:FindFirstChildWhichIsA("BasePart").CFrame)
+        if not target_cf then return false end
+        -- 传送
+        pcall(function()
+            HRP.CFrame = target_cf + Vector3.new(0, 3, 0)
+        end)
+        jitter(0.25, 0.45)  -- AC 规避: 距离突变后等待
+        pcall(function() firepp(prompt) end)
+        return true
+    end
+
+    -- 7.3 MRIEvent 探测 (唯一显式 Remote)
+    local mri = find_first("RemoteEvent", "MRIEvent")
+    if mri then
+        _G.ACB.mri = mri
+        log("L3", "MRIEvent found: %s (use _G.ACB.mri:FireServer(...))", mri:GetFullName())
+    end
+end
+
+-- ============================================================
+-- [8] RUN
+-- ============================================================
+local function main()
+    log("MAIN", "starting bypass...")
+    local t0 = os.clock()
+
+    layer_physical()
+    jitter(0.4, 0.8)
+
+    local attr_results = layer_attribute()
+    jitter(0.4, 0.8)
+
+    layer_prompt()
+
+    log("MAIN", "done in %.2fs", os.clock() - t0)
+    log("MAIN", "namecall samples: %s",
+        (function()
+            local s = {}
+            for k, v in pairs(namecall_sink) do
+                if v > 50 then table.insert(s, k.."="..v) end
+            end
+            table.sort(s)
+            return table.concat(s, " ") ~= "" and table.concat(s, " ") or "(low)"
+        end)())
+
+    -- 写回报告
+    _G.ACB.report = LOG
+    _G.ACB.namecall = namecall_sink
+    _G.ACB.write_log = write_log
+
+    return attr_results
+end
+
+-- 保护 main 不被 AC 抢占
+setthread(8)  -- 最高 identity (常见执行器)
+local ok, err = pcall(main)
+if not ok then
+    log("FATAL", "main failed: %s", tostring(err))
+end
