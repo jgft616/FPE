@@ -1,0 +1,2604 @@
+--!nolint
+-- ============================================
+-- Examination v16.7.17 — WindUI 改造版
+-- 功能与原脚本一致，仅 UI 层改为 WindUI
+-- ============================================
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local StarterGui = game:GetService("StarterGui")
+local BadgeService = game:GetService("BadgeService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
+local lp = Players.LocalPlayer
+
+-- ===== 全局状态（与原脚本一致） =====
+local infStaminaEnabled, espEnabled, headHitboxEnabled = false, false, false
+local autoInteractEnabled, forceResetEnabled = false, false
+local slideEnabled, slideSteerEnabled, nvgEnabled = false, false, false
+local elephantImmuneEnabled, radarBoostEnabled = false, false
+local recoilEnabled, muzzleEnabled = false, false
+local magicBulletEnabled, forceHeadshotEnabled = false, false
+local chatForceEnabled, autoQTEEnabled = false, false
+local shotgunNoPumpEnabled, shieldFixEnabled = false, false
+local shieldVMEnabled, noCDEnabled = false, false
+local noCDActiveUntil = 0
+local pierceShieldEnabled, pierceHelmetEnabled = true, true
+local pierceTeammateEnabled, pierceCorpseEnabled = true, true
+local headSize = 4
+local slideDistanceMult = 2
+local shieldVMAlpha = 0.9
+local slideSteerMode = "camera"
+local mbTargetMode = 1
+
+local AI_CONTAINERS = {"Characters","Reactor1","Reactor2","Reactor3","Reactor4"}
+local SHOTGUN_PUMP_IDS = {
+    ["115903749552317"]=true,["80315455447277"]=true,["89272072134105"]=true,
+    ["96917301511774"]=true,["135326741887023"]=true,["116710355675938"]=true,
+}
+local SHOTGUN_SPEED_MULT = 1000
+
+-- ===== 清理机制 =====
+local cleanupFns = {}
+local _playerChars = {}
+local function _bindPlayerChar(p)
+    local function add(c) if c then _playerChars[c] = true end end
+    local function rem(c) if c then _playerChars[c] = nil end end
+    if p.Character then add(p.Character) end
+    p.CharacterAdded:Connect(add)
+    p.CharacterRemoving:Connect(rem)
+end
+for _, p in ipairs(Players:GetPlayers()) do _bindPlayerChar(p) end
+Players.PlayerAdded:Connect(_bindPlayerChar)
+
+local function batchScan(list, callback, batchSize)
+    batchSize = batchSize or 200
+    spawn(function()
+        local batch = {}
+        for _, d in ipairs(list) do
+            table.insert(batch, d)
+            if #batch >= batchSize then
+                for _, item in ipairs(batch) do pcall(callback, item) end
+                batch = {}
+                RunService.Heartbeat:Wait()
+            end
+        end
+        for _, item in ipairs(batch) do pcall(callback, item) end
+    end)
+end
+
+-- ===== WindUI 窗口 =====
+local Window = WindUI:CreateWindow({
+    Title = "Examination v16.7.17",
+    Icon = "sword",
+    Author = "Examination",
+    Folder = "ExamHub",
+    Size = UDim2.fromOffset(500, 600),
+    Transparent = true,
+    Theme = "Dark",
+    SideBarWidth = 180,
+    ScrollBarEnabled = true,
+    User = { Enabled = true, Anonymous = true, Callback = function() end },
+})
+
+local TabBase   = Window:Tab({ Title = "基础",     Icon = "home" })
+local TabMagic  = Window:Tab({ Title = "魔法子弹", Icon = "crosshair" })
+local TabRadar  = Window:Tab({ Title = "雷达",     Icon = "radar" })
+local TabSet    = Window:Tab({ Title = "设置",     Icon = "settings" })
+
+-- ===== 状态标签（滑铲冷却，悬浮）=====
+local tipGui = Instance.new("ScreenGui")
+tipGui.Name = "ExamRadiusTip"
+tipGui.ResetOnSpawn = false
+tipGui.DisplayOrder = 200
+do
+    if gethui then
+        local ok, h = pcall(gethui); if ok and h then tipGui.Parent = h else tipGui.Parent = CoreGui end
+    else tipGui.Parent = CoreGui end
+end
+_G.ExamRadiusTip = tipGui
+local tipLbl = Instance.new("TextLabel")
+tipLbl.Size = UDim2.new(0, 360, 0, 32)
+tipLbl.Position = UDim2.new(1, -370, 1, -44)
+tipLbl.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+tipLbl.BackgroundTransparency = 0.1
+tipLbl.TextColor3 = Color3.fromRGB(255, 200, 100)
+tipLbl.Font = Enum.Font.GothamBold
+tipLbl.TextSize = 12
+tipLbl.Visible = false
+tipLbl.BorderSizePixel = 0
+tipLbl.TextWrapped = true
+Instance.new("UICorner", tipLbl).CornerRadius = UDim.new(0, 6)
+tipLbl.Parent = tipGui
+
+local tipToken = 0
+local function showCountdownTip(msg, duration)
+    tipToken = tipToken + 1
+    local myToken = tipToken
+    local endAt = tick() + (duration or 10)
+    tipLbl.Visible = true
+    while tick() < endAt do
+        if tipToken ~= myToken then return end
+        local remain = math.max(0, math.ceil(endAt - tick()))
+        tipLbl.Text = msg .. "  [" .. remain .. "s]"
+        task.wait(0.15)
+    end
+    if tipToken == myToken then tipLbl.Visible = false end
+end
+
+-- ===== WindUI Toggle 工厂（替代原 toggleBase/toggleMagic/toggleRadar）=====
+local function makeToggle(tab)
+    return function(title, _keyIgnored, default, callback, _sizeIgnored)
+        local state = default
+        local obj = tab:Toggle({
+            Title = title,
+            Value = default,
+            Callback = function(v) state = v; callback(v) end,
+        })
+        local function setState(v)
+            if state == v then return end
+            state = v
+            local ok = pcall(function() obj:Set(v) end)
+            if not ok then callback(v) end
+        end
+        return obj, setState
+    end
+end
+local toggleBase  = makeToggle(TabBase)
+local toggleMagic = makeToggle(TabMagic)
+local toggleRadar = makeToggle(TabRadar)
+
+-- ============================================
+-- 模块 1: 无限体力
+-- ============================================
+do
+    local staminaLoop, cachedState, originalStamina = nil, nil, {}
+    local INFINITE_STAMINA = 1e9
+    local function getStaminaState()
+        if cachedState then
+            local char = lp.Character
+            local handler = char and char:FindFirstChild("ClientHandler")
+            local sm = handler and handler:FindFirstChild("State")
+            if sm and cachedState == sm then
+                local ok, s = pcall(function() return require(sm) end)
+                if ok and type(s) == "table" and s.stamina then return s end
+            end
+            cachedState = nil
+        end
+        local char = lp.Character; if not char then return nil end
+        local handler = char:FindFirstChild("ClientHandler"); if not handler then return nil end
+        local sm = handler:FindFirstChild("State"); if not sm then return nil end
+        local ok, s = pcall(function() return require(sm) end)
+        if ok and type(s) == "table" and s.stamina then cachedState = sm; return s end
+        return nil
+    end
+    local function saveOrig(s)
+        if next(originalStamina) ~= nil then return end
+        originalStamina = { current=s.stamina.current, fullRegen=s.stamina.fullRegen, regenDelay=s.stamina.regenDelay, max=s.stamina.max, maxStamina=s.stamina.maxStamina, maximum=s.stamina.maximum }
+        _G._ExamStaminaBackup = originalStamina
+    end
+    local function applyInf(s)
+        s.stamina.current = INFINITE_STAMINA; s.stamina.fullRegen = false; s.stamina.regenDelay = 0
+        if s.stamina.max ~= nil then s.stamina.max = INFINITE_STAMINA end
+        if s.stamina.maxStamina ~= nil then s.stamina.maxStamina = INFINITE_STAMINA end
+        if s.stamina.maximum ~= nil then s.stamina.maximum = INFINITE_STAMINA end
+    end
+    local function restoreOrig()
+        local s = getStaminaState()
+        local backup = originalStamina
+        if next(backup) == nil and _G._ExamStaminaBackup then backup = _G._ExamStaminaBackup end
+        if not s or next(backup) == nil then originalStamina = {}; _G._ExamStaminaBackup = nil; return end
+        if backup.current ~= nil then s.stamina.current = backup.current end
+        if backup.fullRegen ~= nil then s.stamina.fullRegen = backup.fullRegen end
+        if backup.regenDelay ~= nil then s.stamina.regenDelay = backup.regenDelay end
+        if backup.max ~= nil then s.stamina.max = backup.max end
+        if backup.maxStamina ~= nil then s.stamina.maxStamina = backup.maxStamina end
+        if backup.maximum ~= nil then s.stamina.maximum = backup.maximum end
+        originalStamina = {}; _G._ExamStaminaBackup = nil
+    end
+    local function setupLoop()
+        if staminaLoop then pcall(function() staminaLoop:Disconnect() end); staminaLoop = nil end
+        if not infStaminaEnabled then return end
+        staminaLoop = spawn(function()
+            while infStaminaEnabled do
+                local s = getStaminaState()
+                if s then saveOrig(s); applyInf(s) end
+                wait(0.5)
+            end
+            staminaLoop = nil
+        end)
+    end
+    toggleBase("无限体力", nil, false, function(v)
+        infStaminaEnabled = v
+        if v then originalStamina = {}; cachedState = nil; setupLoop()
+        else
+            if staminaLoop then pcall(function() staminaLoop:Disconnect() end); staminaLoop = nil end
+            restoreOrig()
+        end
+    end)
+    lp.CharacterAdded:Connect(function()
+        wait(1); cachedState = nil
+        if infStaminaEnabled then originalStamina = {}; setupLoop() end
+    end)
+    table.insert(cleanupFns, function()
+        infStaminaEnabled = false
+        if staminaLoop then pcall(function() staminaLoop:Disconnect() end) end
+        restoreOrig()
+    end)
+end
+
+-- ============================================
+-- 模块 2: AI ESP
+-- ============================================
+do
+    local espConnections = {}
+    local ESP_HL_NEW, ESP_HB_NEW = "_ExamESP_HL", "_ExamESP_HB"
+    local BIG = {SIN=true,Chimera=true,Gilbert=true,Mikhail=true,Leaper=true}
+    local MINI = {["RIF Miniboss"]=true,Dave=true,CombatEngineer=true,Vorax=true}
+    local C_NORMAL, C_MINI, C_BIG = Color3.fromRGB(255,0,0), Color3.fromRGB(255,140,0), Color3.fromRGB(170,0,255)
+    local C_BTR, C_DRONE = Color3.fromRGB(170,0,255), Color3.fromRGB(255,80,200)
+    local showESPName, showESPHealth = true, true
+    local function isAICharacter(m)
+        if not m or not m:IsA("Model") then return false end
+        if Players:GetPlayerFromCharacter(m) then return false end
+        if m.Name == "Leaper" then return true end
+        if m:FindFirstChild("AI") or m:FindFirstChild("GrabField") or m:FindFirstChild("AmbushScenery") or m:FindFirstChild("CharacterTeam") then return true end
+        return false
+    end
+    local function isOurESPNode(c)
+        if not c then return false end
+        local n = c.Name
+        return (c:IsA("Highlight") and (n=="AI_Highlight" or n==ESP_HL_NEW))
+            or (c:IsA("BillboardGui") and (n=="AI_HealthUI" or n==ESP_HB_NEW))
+    end
+    local function classify(m)
+        if BIG[m.Name] then return C_BIG, "BOSS" end
+        if MINI[m.Name] then return C_MINI, "Miniboss" end
+        return C_NORMAL, "AI"
+    end
+    local function tagToPre(tag)
+        if tag=="BOSS" then return "[BOSS] " elseif tag=="Miniboss" then return "[Miniboss] " end
+        return ""
+    end
+    local function genText(model, hum, pre)
+        local parts = {}
+        if showESPName then table.insert(parts, model.Name) end
+        if showESPHealth and hum then table.insert(parts, string.format("%d / %d", math.floor(hum.Health), math.floor(hum.MaxHealth))) end
+        if #parts == 0 then return pre ~= "" and pre:sub(1,-2) or "" end
+        return pre .. table.concat(parts, " | ")
+    end
+    local function cleanAllESP()
+        local function cleanIn(obj)
+            if not obj then return end
+            local kill = {}
+            for _, c in ipairs(obj:GetChildren()) do if isOurESPNode(c) then table.insert(kill, c) end end
+            for _, c in ipairs(kill) do pcall(function() c:Destroy() end) end
+        end
+        local map = Workspace:FindFirstChild("Map")
+        if map then local b = map:FindFirstChild("BTR-82 (BOSS)"); if b then cleanIn(b) end end
+        cleanIn(Workspace:FindFirstChild("BTRDrone"))
+        for _, fn in ipairs(AI_CONTAINERS) do
+            local folder = Workspace:FindFirstChild(fn)
+            if folder then for _, c in ipairs(folder:GetChildren()) do cleanIn(c) end end
+        end
+    end
+    local function clearESP()
+        for _, c in ipairs(espConnections) do pcall(function() c:Disconnect() end) end
+        espConnections = {}; cleanAllESP()
+    end
+    local function highlightAI(model, color, tag)
+        if not espEnabled or model:FindFirstChild(ESP_HL_NEW) then return end
+        local hl = Instance.new("Highlight")
+        hl.Name=ESP_HL_NEW; hl.Adornee=model; hl.FillColor=color
+        hl.OutlineColor=Color3.fromRGB(255,255,255); hl.OutlineTransparency=1
+        hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.Parent=model
+        local bb = Instance.new("BillboardGui")
+        bb.Name=ESP_HB_NEW; bb.Adornee=model; bb.Size=UDim2.new(0,220,0,25)
+        bb.StudsOffset=Vector3.new(0,4,0); bb.AlwaysOnTop=true; bb.MaxDistance=300; bb.Parent=model
+        local tl = Instance.new("TextLabel")
+        tl.Parent=bb; tl.Size=UDim2.new(1,0,1,0); tl.BackgroundTransparency=1
+        tl.TextColor3=color; tl.TextStrokeTransparency=0; tl.TextScaled=true; tl.Font=Enum.Font.SourceSansBold
+        local pre = tagToPre(tag)
+        spawn(function()
+            while model and model.Parent and espEnabled and model:FindFirstChild(ESP_HL_NEW) do
+                local hum = model:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    if hum.Health <= 0 then hl:Destroy(); bb:Destroy(); break end
+                    tl.Text = genText(model, hum, pre)
+                end
+                wait(0.3)
+            end
+        end)
+    end
+    local function getBTRModel() local m=Workspace:FindFirstChild("Map"); return m and m:FindFirstChild("BTR-82 (BOSS)") end
+    local function getBTRHealth(btr)
+        if not btr then return nil end
+        local hp = btr:GetAttribute("Health") or btr:GetAttribute("HP"); if hp then return hp end
+        local r = btr:FindFirstChild("BTRRoot")
+        if r then hp = r:GetAttribute("Health") or r:GetAttribute("HP"); if hp then return hp end end
+        return nil
+    end
+    local function removeBTR(btr)
+        if not btr then return end
+        for _, ch in ipairs(btr:GetChildren()) do if isOurESPNode(ch) then pcall(function() ch:Destroy() end) end end
+    end
+    local function highlightBTR(btrModel)
+        if not espEnabled then return end
+        local hp = getBTRHealth(btrModel)
+        if hp and hp <= 0 then removeBTR(btrModel); return end
+        if btrModel:FindFirstChild(ESP_HL_NEW) then return end
+        local hl = Instance.new("Highlight")
+        hl.Name=ESP_HL_NEW; hl.Adornee=btrModel; hl.FillColor=C_BTR
+        hl.OutlineColor=Color3.fromRGB(255,255,255); hl.OutlineTransparency=1
+        hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.Parent=btrModel
+        local bb = Instance.new("BillboardGui")
+        bb.Name=ESP_HB_NEW; bb.Adornee=btrModel; bb.Size=UDim2.new(0,300,0,30)
+        bb.StudsOffset=Vector3.new(0,12,0); bb.AlwaysOnTop=true; bb.MaxDistance=600; bb.Parent=btrModel
+        local tl = Instance.new("TextLabel")
+        tl.Parent=bb; tl.Size=UDim2.new(1,0,1,0); tl.BackgroundTransparency=1
+        tl.TextColor3=C_BTR; tl.TextStrokeTransparency=0; tl.TextScaled=true; tl.Font=Enum.Font.SourceSansBold
+        local function txt(cur)
+            local p = {}
+            if showESPName then table.insert(p, "BTR-82") end
+            if showESPHealth and cur then table.insert(p, tostring(math.floor(cur))) end
+            if #p == 0 then return "[BOSS]" end
+            return "[BOSS] " .. table.concat(p, " | ")
+        end
+        tl.Text = txt(hp)
+        spawn(function()
+            while btrModel and btrModel.Parent and espEnabled and btrModel:FindFirstChild(ESP_HL_NEW) do
+                local cur = getBTRHealth(btrModel)
+                if cur and cur <= 0 then removeBTR(btrModel); break end
+                tl.Text = txt(cur); wait(0.3)
+            end
+        end)
+    end
+    local function highlightDrone(drone)
+        if not espEnabled or drone:FindFirstChild(ESP_HL_NEW) then return end
+        local part = drone:FindFirstChild("DroneHitbox") or drone.PrimaryPart
+        if not part then for _, c in ipairs(drone:GetDescendants()) do if c:IsA("BasePart") then part=c; break end end end
+        if not part then return end
+        local hl = Instance.new("Highlight")
+        hl.Name=ESP_HL_NEW; hl.Adornee=drone; hl.FillColor=C_DRONE
+        hl.OutlineColor=Color3.fromRGB(255,255,255); hl.OutlineTransparency=1
+        hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop; hl.Parent=drone
+        local bb = Instance.new("BillboardGui")
+        bb.Name=ESP_HB_NEW; bb.Adornee=drone; bb.Size=UDim2.new(0,200,0,25)
+        bb.StudsOffset=Vector3.new(0,4,0); bb.AlwaysOnTop=true; bb.MaxDistance=400; bb.Parent=drone
+        local tl = Instance.new("TextLabel")
+        tl.Parent=bb; tl.Size=UDim2.new(1,0,1,0); tl.BackgroundTransparency=1
+        tl.TextColor3=C_DRONE; tl.TextStrokeTransparency=0; tl.TextScaled=true; tl.Font=Enum.Font.SourceSansBold
+        tl.Text = "[无人机]"
+        spawn(function()
+            while drone and drone.Parent and espEnabled and drone:FindFirstChild(ESP_HL_NEW) do
+                local hum = drone:FindFirstChildOfClass("Humanoid")
+                local p = {"无人机"}
+                if showESPHealth and hum then table.insert(p, string.format("%d / %d", math.floor(hum.Health), math.floor(hum.MaxHealth))) end
+                tl.Text = "[无人机] " .. table.concat(p, " | "); wait(0.3)
+            end
+        end)
+    end
+    local function setupESP()
+        clearESP(); if not espEnabled then return end
+        for _, fn in ipairs(AI_CONTAINERS) do
+            local folder = Workspace:FindFirstChild(fn)
+            if folder then
+                for _, v in ipairs(folder:GetChildren()) do
+                    if isAICharacter(v) then local c, t = classify(v); highlightAI(v, c, t) end
+                end
+                table.insert(espConnections, folder.ChildAdded:Connect(function(v)
+                    wait(0.1)
+                    if espEnabled and isAICharacter(v) then local c, t = classify(v); highlightAI(v, c, t) end
+                end))
+            end
+        end
+        local btr = getBTRModel(); if btr then highlightBTR(btr) end
+        local map = Workspace:FindFirstChild("Map")
+        if map then
+            table.insert(espConnections, map.ChildAdded:Connect(function(c)
+                if espEnabled and c.Name == "BTR-82 (BOSS)" then wait(0.5); highlightBTR(c) end
+            end))
+        end
+        local drone = Workspace:FindFirstChild("BTRDrone"); if drone then highlightDrone(drone) end
+        table.insert(espConnections, Workspace.ChildAdded:Connect(function(c)
+            if espEnabled and c.Name == "BTRDrone" then wait(0.3); highlightDrone(c) end
+        end))
+    end
+    toggleBase("AI ESP（高亮常开）", nil, false, function(v) espEnabled = v; setupESP() end)
+    toggleBase("显示名称", nil, true, function(v) showESPName = v end)
+    toggleBase("显示血量", nil, true, function(v) showESPHealth = v end)
+    table.insert(cleanupFns, function() clearESP() end)
+end
+
+-- ============================================
+-- 模块 3: 头部 Hitbox
+-- ============================================
+do
+    local hitboxConnections, hitboxModified = {}, {}
+    local function restoreHeadHitbox()
+        for p, orig in pairs(hitboxModified) do
+            pcall(function() p.Size=orig.Size; p.CanCollide=orig.CanCollide; p.Transparency=orig.Transparency end)
+        end
+        table.clear(hitboxModified)
+    end
+    local function isDead(model)
+        if not model then return true end
+        local hum = model:FindFirstChildOfClass("Humanoid")
+        if not hum then return true end
+        return hum.Health <= 0
+    end
+    local function restoreOne(p)
+        local orig = hitboxModified[p]; if not orig then return end
+        pcall(function() p.Size=orig.Size; p.CanCollide=orig.CanCollide; p.Transparency=orig.Transparency end)
+        hitboxModified[p] = nil
+    end
+    local function applyHead(part)
+        if not headHitboxEnabled or not part or not part:IsA("BasePart") or part.Name ~= "Head" then return end
+        local model = part.Parent
+        if not model or not model:IsA("Model") then return end
+        if Players:GetPlayerFromCharacter(model) then return end
+        if isDead(model) then if hitboxModified[part] then restoreOne(part) end; return end
+        if not hitboxModified[part] then
+            hitboxModified[part] = { Size=part.Size, CanCollide=part.CanCollide, Transparency=part.Transparency }
+        end
+        pcall(function()
+            part.Size = Vector3.new(headSize, headSize, headSize)
+            part.CanCollide = false; part.Transparency = 0.5
+        end)
+    end
+    local function setup()
+        for _, c in ipairs(hitboxConnections) do pcall(function() c:Disconnect() end) end
+        hitboxConnections = {}
+        if not headHitboxEnabled then restoreHeadHitbox(); return end
+        batchScan(Workspace:GetDescendants(), applyHead, 200)
+        table.insert(hitboxConnections, Workspace.DescendantAdded:Connect(applyHead))
+    end
+    toggleBase("头部Hitbox扩大", nil, false, function(v) headHitboxEnabled = v; setup() end)
+    TabBase:Input({
+        Title = "头部尺寸 (1-20)",
+        Value = tostring(headSize),
+        Type = "Input",
+        Callback = function(v)
+            local n = tonumber(v)
+            if n and n >= 1 and n <= 20 then headSize = n; if headHitboxEnabled then setup() end end
+        end,
+    })
+    table.insert(cleanupFns, function()
+        for _, c in ipairs(hitboxConnections) do pcall(function() c:Disconnect() end) end
+        restoreHeadHitbox()
+    end)
+end
+
+-- ============================================
+-- 模块 4: 及时交互
+-- ============================================
+do
+    local promptConn
+    local function setup()
+        if promptConn then promptConn:Disconnect(); promptConn = nil end
+        if not autoInteractEnabled then return end
+        promptConn = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt) fireproximityprompt(prompt) end)
+    end
+    toggleBase("及时交互", nil, false, function(v) autoInteractEnabled = v; setup() end)
+    table.insert(cleanupFns, function() if promptConn then promptConn:Disconnect() end end)
+end
+
+-- ============================================
+-- 模块 5: 无条件重置
+-- ============================================
+do
+    local resetLoop
+    local function setup()
+        if resetLoop then resetLoop:Disconnect(); resetLoop = nil end
+        if not forceResetEnabled then pcall(function() StarterGui:SetCore("ResetButtonCallback", false) end); return end
+        resetLoop = RunService.Heartbeat:Connect(function() pcall(function() StarterGui:SetCore("ResetButtonCallback", true) end) end)
+    end
+    toggleBase("无条件重置", nil, false, function(v) forceResetEnabled = v; setup() end)
+    table.insert(cleanupFns, function()
+        if resetLoop then resetLoop:Disconnect() end
+        pcall(function() StarterGui:SetCore("ResetButtonCallback", false) end)
+    end)
+end
+
+-- ============================================
+-- 模块 6: 滑铲距离修改
+-- ============================================
+do
+    local badgeHooked, blockedHooked = false, false
+    local slideSpeedLoop, slideSlidingConn
+    local cooldownEndTime, needsRefresh = 0, false
+    local SLIDE_COOLDOWN = 9
+    local oldUserHasBadgeAsync = BadgeService.UserHasBadgeAsync
+    local function hookBadge()
+        if badgeHooked then return true end
+        if not hookfunction then return false end
+        local ok = pcall(function()
+            hookfunction(BadgeService.UserHasBadgeAsync, function(self, uid, bid)
+                if bid == 3938313051889761 then return true end
+                return oldUserHasBadgeAsync(self, uid, bid)
+            end)
+        end)
+        badgeHooked = ok; return ok
+    end
+    local function hookIsBlocked()
+        if blockedHooked then return true end
+        if not (getgc and hookfunction) then return false end
+        local count = 0
+        for _, f in pairs(getgc(true)) do
+            if type(f) == "function" then
+                pcall(function()
+                    local info = getinfo(f)
+                    if info.name == "isSlideDirectionBlocked" and (info.source or ""):find("MovementController") then
+                        hookfunction(f, function() return false end); count = count + 1
+                    end
+                end)
+            end
+        end
+        blockedHooked = count > 0; return blockedHooked
+    end
+    local function boostSlide(hum)
+        spawn(function()
+            wait(0.03)
+            local char = hum.Parent; if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            local av = hrp:FindFirstChild("ActionVelocity")
+            if av and av:IsA("LinearVelocity") then
+                pcall(function() av.VectorVelocity = av.VectorVelocity * slideDistanceMult; av.MaxForce = 1e9 end)
+            end
+        end)
+    end
+    local function bindSlide(hum)
+        if slideSlidingConn then slideSlidingConn:Disconnect(); slideSlidingConn = nil end
+        slideSlidingConn = hum:GetAttributeChangedSignal("sliding"):Connect(function()
+            if hum:GetAttribute("sliding") == true then boostSlide(hum); needsRefresh = false
+            else cooldownEndTime = tick() + SLIDE_COOLDOWN end
+        end)
+    end
+    local function setup()
+        if slideSpeedLoop then slideSpeedLoop:Disconnect(); slideSpeedLoop = nil end
+        if slideSlidingConn then slideSlidingConn:Disconnect(); slideSlidingConn = nil end
+        if not slideEnabled then return end
+        hookBadge(); hookIsBlocked(); needsRefresh = true
+        slideSpeedLoop = RunService.Heartbeat:Connect(function()
+            local char = lp.Character; if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+            if hum.MoveDirection.Magnitude > 0.1 and hum.WalkSpeed < 18.5 and hum.WalkSpeed > 0 then hum.WalkSpeed = 18.5 end
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if hrp and hum:GetAttribute("sliding") == true then
+                local av = hrp:FindFirstChild("ActionVelocity")
+                if not av then hum:SetAttribute("sliding", false) end
+            end
+        end)
+        local char = lp.Character
+        if char then local hum = char:FindFirstChildOfClass("Humanoid"); if hum then bindSlide(hum) end end
+    end
+    toggleBase("滑铲距离修改", nil, false, function(v) slideEnabled = v; setup() end)
+    TabBase:Input({
+        Title = "滑铲距离倍率 (1-10)",
+        Value = tostring(slideDistanceMult),
+        Callback = function(v)
+            local n = tonumber(v)
+            if n and n >= 1 and n <= 10 then slideDistanceMult = n end
+        end,
+    })
+    lp.CharacterAdded:Connect(function() wait(2); if slideEnabled then setup() end end)
+    spawn(function()
+        while tipGui.Parent do
+            wait(0.2)
+            if slideEnabled then
+                if needsRefresh then
+                    tipLbl.Text = "请滑铲一次刷新状态"
+                    tipLbl.TextColor3 = Color3.fromRGB(255,200,0)
+                    tipLbl.Visible = true
+                else
+                    local now = tick()
+                    if now < cooldownEndTime then
+                        tipLbl.Text = string.format("滑铲冷却: %.1f 秒", cooldownEndTime - now)
+                        tipLbl.TextColor3 = Color3.fromRGB(255,80,80)
+                        tipLbl.Visible = true
+                    else
+                        tipLbl.Visible = false
+                    end
+                end
+            else
+                tipLbl.Visible = false
+            end
+        end
+    end)
+    table.insert(cleanupFns, function()
+        if slideSpeedLoop then slideSpeedLoop:Disconnect() end
+        if slideSlidingConn then slideSlidingConn:Disconnect() end
+    end)
+end
+
+-- ============================================
+-- 模块 6.5: 滑铲变向
+-- ============================================
+do
+    local steerLoop
+    local function computeDir(hum, cam)
+        if slideSteerMode == "camera" then
+            if not cam then return nil end
+            local d = cam.CFrame.LookVector; d = Vector3.new(d.X, 0, d.Z)
+            if d.Magnitude < 0.1 then return nil end
+            return d.Unit
+        else
+            local md = hum.MoveDirection; md = Vector3.new(md.X, 0, md.Z)
+            if md.Magnitude < 0.1 then
+                if cam then local d = cam.CFrame.LookVector; d = Vector3.new(d.X, 0, d.Z); if d.Magnitude > 0.1 then return d.Unit end end
+                return nil
+            end
+            return md.Unit
+        end
+    end
+    local function setup()
+        if steerLoop then steerLoop:Disconnect(); steerLoop = nil end
+        if not slideSteerEnabled then return end
+        steerLoop = RunService.Heartbeat:Connect(function()
+            if not slideSteerEnabled then return end
+            local char = lp.Character; if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+            if hum:GetAttribute("sliding") ~= true then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+            local av = hrp:FindFirstChild("ActionVelocity"); if not av then return end
+            local isL = av:IsA("LinearVelocity"); local isV = av:IsA("VectorForce")
+            if not (isL or isV) then return end
+            local curVel = isL and av.VectorVelocity or av.Force
+            local mag = curVel.Magnitude; if mag < 0.1 then return end
+            local dir = computeDir(hum, workspace.CurrentCamera); if not dir then return end
+            local nv = dir * mag
+            if isL then pcall(function() av.VectorVelocity = nv end) else pcall(function() av.Force = nv end) end
+        end)
+    end
+    toggleBase("滑铲变向（视角朝哪滑哪）", nil, false, function(v) slideSteerEnabled = v; setup() end)
+    TabBase:Button({
+        Title = "变向模式: 视角控制",
+        Callback = function(self)
+            slideSteerMode = (slideSteerMode == "camera") and "move" or "camera"
+            self:SetTitle(slideSteerMode == "camera" and "变向模式: 视角控制" or "变向模式: 移动控制")
+        end,
+    })
+    lp.CharacterAdded:Connect(function() wait(2); if slideSteerEnabled then setup() end end)
+    table.insert(cleanupFns, function() if steerLoop then pcall(function() steerLoop:Disconnect() end) end end)
+end
+
+-- ============================================
+-- 模块 7: 无限电量夜视仪
+-- ============================================
+do
+    local nvgBadgeHooked, nvgBadgeOriginal = false, nil
+    local function hookBadges()
+        if nvgBadgeHooked or not hookfunction then return end
+        nvgBadgeOriginal = BadgeService.UserHasBadgeAsync
+        pcall(function()
+            hookfunction(BadgeService.UserHasBadgeAsync, function(self, uid, bid)
+                if bid == 3938313051889761 or bid == 3801395471806771 then return true end
+                return nvgBadgeOriginal(self, uid, bid)
+            end)
+        end)
+        nvgBadgeHooked = true
+    end
+    local function makeCloaker()
+        local char = lp.Character; if not char then return end
+        local existing = char:FindFirstChild("IsCloaker")
+        if existing and existing:IsA("BoolValue") then
+            if not existing.Value then existing.Value = true end
+        else
+            local bv = Instance.new("BoolValue"); bv.Name="IsCloaker"; bv.Value=true; bv.Parent=char
+            _G._InfNVG_AddedCloaker = true
+        end
+    end
+    local function bindBattery()
+        if _G._InfNVG_TextSignalConn then return end
+        local pg = lp:FindFirstChild("PlayerGui"); if not pg then return end
+        local hud = pg:FindFirstChild("NightVisionHUD"); if not hud then return end
+        local container = hud:FindFirstChild("Container"); if not container then return end
+        local status = container:FindFirstChild("Status"); if not status then return end
+        local battery = status:FindFirstChild("Battery"); if not battery then return end
+        local percent = battery:FindFirstChild("Percentage")
+        if percent and percent:IsA("TextLabel") then
+            if not _G._InfNVG_OrigPercentText then _G._InfNVG_OrigPercentText = percent.Text end
+            percent.Text = "无限"
+            _G._InfNVG_TextSignalConn = percent:GetPropertyChangedSignal("Text"):Connect(function()
+                if percent.Text ~= "无限" then percent.Text = "无限" end
+            end)
+        end
+        local bar = battery:FindFirstChild("Bar")
+        if bar and bar:IsA("Frame") and not _G._InfNVG_BarSignalConn then
+            local barRef = bar
+            spawn(function()
+                wait(0.3); if not nvgEnabled then return end
+                if _G._InfNVG_BarSignalConn then return end
+                _G._InfNVG_OrigBarSize = barRef.Size
+                _G._InfNVG_BarSignalConn = barRef:GetPropertyChangedSignal("Size"):Connect(function()
+                    if barRef.Size ~= _G._InfNVG_OrigBarSize then barRef.Size = _G._InfNVG_OrigBarSize end
+                end)
+            end)
+        end
+    end
+    local function unbindBattery()
+        if _G._InfNVG_TextSignalConn then _G._InfNVG_TextSignalConn:Disconnect(); _G._InfNVG_TextSignalConn = nil end
+        if _G._InfNVG_BarSignalConn then _G._InfNVG_BarSignalConn:Disconnect(); _G._InfNVG_BarSignalConn = nil end
+    end
+    local function startLoop()
+        if _G._InfNVG_Loop then pcall(function() _G._InfNVG_Loop:Disconnect() end); _G._InfNVG_Loop = nil end
+        _G._InfNVG_Loop = spawn(function()
+            while nvgEnabled do
+                makeCloaker()
+                if not _G._InfNVG_TextSignalConn then bindBattery() end
+                wait(0.3)
+            end
+        end)
+    end
+    local function stopRestore()
+        if _G._InfNVG_Loop then pcall(function() _G._InfNVG_Loop:Disconnect() end); _G._InfNVG_Loop = nil end
+        unbindBattery()
+        local char = lp.Character
+        if char and _G._InfNVG_AddedCloaker then
+            local c = char:FindFirstChild("IsCloaker"); if c then c:Destroy() end
+        end
+        _G._InfNVG_AddedCloaker = nil
+    end
+    local function setup()
+        if not nvgEnabled then stopRestore(); return end
+        hookBadges(); bindBattery(); makeCloaker(); startLoop()
+    end
+    toggleBase("无限电量夜视仪", nil, false, function(v) nvgEnabled = v; setup() end)
+    lp.CharacterAdded:Connect(function()
+        wait(1)
+        if nvgEnabled then unbindBattery(); _G._InfNVG_OrigPercentText = nil; _G._InfNVG_OrigBarSize = nil; setup() end
+    end)
+    table.insert(cleanupFns, function()
+        stopRestore()
+        if nvgBadgeHooked and nvgBadgeOriginal and hookfunction then
+            pcall(function() hookfunction(BadgeService.UserHasBadgeAsync, nvgBadgeOriginal) end)
+        end
+    end)
+end
+
+-- ============================================
+-- 模块 8: 免疫象脚 + 致死区
+-- ============================================
+do
+    local keywords = {"elephant","lookatme","playerdiedbylooking","diedbylooking"}
+    local function match(name)
+        local l = name:lower()
+        for _, kw in ipairs(keywords) do if l:find(kw, 1, true) then return true end end
+        return false
+    end
+    local disabledScripts = {}
+    local function disableScripts()
+        local char = lp.Character; if not char then return 0 end
+        local count = 0
+        for _, d in ipairs(char:GetDescendants()) do
+            if d:IsA("BaseScript") or d:IsA("LocalScript") or d:IsA("Script") then
+                if match(d.Name) and not d.Disabled then
+                    if disabledScripts[d] == nil then disabledScripts[d] = false end
+                    local ok = pcall(function() d.Disabled = true end); if ok then count = count + 1 end
+                end
+            end
+        end
+        _G._ElephantImmune_DisabledScripts = disabledScripts
+        return count
+    end
+    local function restoreScripts()
+        for s, orig in pairs(disabledScripts) do if s and s.Parent then pcall(function() s.Disabled = orig end) end end
+        disabledScripts = {}; _G._ElephantImmune_DisabledScripts = nil
+    end
+    local killPartBackup = {}
+    local function killPartRestore()
+        for kp, orig in pairs(killPartBackup) do
+            if kp and kp.Parent then
+                pcall(function() kp.Size=orig.Size; kp.CFrame=orig.CFrame; kp.CanTouch=orig.CanTouch; kp.CanCollide=orig.CanCollide end)
+            end
+        end
+        killPartBackup = {}; _G._KillPartBackup = nil
+    end
+    local function neutralizeOne(kp)
+        if not kp or not kp.Parent then return end
+        if not killPartBackup[kp] then
+            killPartBackup[kp] = { Size=kp.Size, CFrame=kp.CFrame, CanTouch=kp.CanTouch, CanCollide=kp.CanCollide }
+        end
+        pcall(function()
+            kp.Size = Vector3.new(0.001, 0.001, 0.001)
+            kp.CFrame = CFrame.new(99999, 99999, 99999)
+            kp.CanTouch = false; kp.CanCollide = false
+        end)
+    end
+    local killPartScanLoop
+    local function startKillPartScan()
+        killPartScanLoop = spawn(function()
+            while elephantImmuneEnabled do
+                wait(2); if not elephantImmuneEnabled then break end
+                local function scanOne(inst)
+                    if inst:IsA("BasePart") and inst.Name == "KillPart" and not killPartBackup[inst] then neutralizeOne(inst) end
+                end
+                for _, c in ipairs(Workspace:GetChildren()) do
+                    scanOne(c); for _, cc in ipairs(c:GetChildren()) do scanOne(cc) end
+                end
+            end
+        end)
+    end
+    local elephantLoop, lastScan = nil, 0
+    local function startElephantLoop()
+        if elephantLoop then pcall(function() elephantLoop:Disconnect() end); elephantLoop = nil end
+        if not elephantImmuneEnabled then return end
+        elephantLoop = RunService.Heartbeat:Connect(function()
+            if not elephantImmuneEnabled then return end
+            local now = tick(); if now - lastScan < 0.5 then return end
+            lastScan = now; disableScripts()
+        end)
+    end
+    local function setup()
+        if elephantLoop then pcall(function() elephantLoop:Disconnect() end); elephantLoop = nil end
+        if killPartScanLoop then killPartScanLoop = nil end
+        if not elephantImmuneEnabled then killPartRestore(); restoreScripts(); return end
+        disableScripts()
+        batchScan(Workspace:GetDescendants(), function(d)
+            if d:IsA("BasePart") and d.Name == "KillPart" then neutralizeOne(d) end
+        end, 200)
+        startKillPartScan(); startElephantLoop()
+    end
+    toggleBase("免疫象脚 + 致死区", nil, false, function(v) elephantImmuneEnabled = v; setup() end)
+    lp.CharacterAdded:Connect(function()
+        wait(1); disabledScripts = {}; _G._ElephantImmune_DisabledScripts = nil
+        if elephantImmuneEnabled then setup() end
+    end)
+    table.insert(cleanupFns, function()
+        elephantImmuneEnabled = false
+        if elephantLoop then elephantLoop:Disconnect() end
+        killPartRestore(); restoreScripts()
+    end)
+end
+
+-- ============================================
+-- 模块 9: 快速换弹
+-- ============================================
+do
+    local FR_TARGET_MULT = 2.0
+    local frEnabled, frLoopToken, frBackup = false, 0, nil
+    local function frCaptureBackup(char)
+        if frBackup then return end
+        frBackup = { Active=char:GetAttribute("SquadBuffActive"), Reload=char:GetAttribute("SquadReloadSpeedMultiplier") }
+    end
+    local function frPush()
+        local char = lp.Character; if not char then return end
+        pcall(function() char:SetAttribute("SquadBuffActive", true) end)
+        pcall(function() char:SetAttribute("SquadReloadSpeedMultiplier", FR_TARGET_MULT) end)
+    end
+    local function frRestore()
+        local char = lp.Character; if not char or not frBackup then return end
+        if frBackup.Active ~= nil then pcall(function() char:SetAttribute("SquadBuffActive", frBackup.Active) end)
+        else pcall(function() char:SetAttribute("SquadBuffActive", nil) end) end
+        if frBackup.Reload ~= nil then pcall(function() char:SetAttribute("SquadReloadSpeedMultiplier", frBackup.Reload) end)
+        else pcall(function() char:SetAttribute("SquadReloadSpeedMultiplier", nil) end) end
+        frBackup = nil
+    end
+    local function frStartLoop()
+        frLoopToken = frLoopToken + 1
+        local my = frLoopToken
+        spawn(function()
+            while frEnabled and frLoopToken == my do frPush(); wait(0.15) end
+        end)
+    end
+    toggleBase("快速换弹", nil, false, function(v)
+        frEnabled = v
+        if v then
+            local c = lp.Character; if c then frCaptureBackup(c) end
+            frStartLoop()
+        else frLoopToken = frLoopToken + 1; frRestore() end
+    end)
+    lp.CharacterAdded:Connect(function()
+        wait(1.5)
+        if frEnabled then frBackup = nil; local c = lp.Character; if c then frCaptureBackup(c) end; frStartLoop() end
+    end)
+    table.insert(cleanupFns, function() frEnabled = false; frLoopToken = frLoopToken + 1; frRestore() end)
+end
+
+-- ============================================
+-- 模块 11: 去除枪口遮挡
+-- ============================================
+do
+    local muzzleHbConn, muzzleDisabledParts, lastTool, watchConn = nil, {}, nil, nil
+    local function findFirePoint()
+        local char = lp.Character; if not char then return nil, nil end
+        local tool = char:FindFirstChildWhichIsA("Tool"); if not tool then return nil, char end
+        for _, d in ipairs(tool:GetDescendants()) do
+            if d:IsA("Attachment") and d.Name == "FirePoint" then return d, char end
+        end
+        return nil, char
+    end
+    local function restoreAll()
+        if next(muzzleDisabledParts) == nil then return end
+        for p, orig in pairs(muzzleDisabledParts) do if p and p.Parent then pcall(function() p.CanCollide = orig end) end end
+        muzzleDisabledParts = {}
+    end
+    local function setup()
+        if muzzleHbConn then pcall(function() muzzleHbConn:Disconnect() end); muzzleHbConn = nil end
+        if watchConn then watchConn:Disconnect(); watchConn = nil end
+        if not muzzleEnabled then restoreAll(); lastTool = nil; return end
+        muzzleHbConn = RunService.Heartbeat:Connect(function()
+            if not muzzleEnabled then return end
+            restoreAll()
+            if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then pcall(function() end) end
+        end)
+        watchConn = RunService.Heartbeat:Connect(function()
+            if not muzzleEnabled then return end
+            local char = lp.Character
+            local tool = char and char:FindFirstChildWhichIsA("Tool")
+            if tool ~= lastTool then lastTool = tool; restoreAll() end
+        end)
+    end
+    toggleBase("去除枪口遮挡", nil, false, function(v) muzzleEnabled = v; setup() end)
+    lp.CharacterAdded:Connect(function() wait(1); if muzzleEnabled then restoreAll(); lastTool = nil; setup() end end)
+    table.insert(cleanupFns, function()
+        if muzzleHbConn then pcall(function() muzzleHbConn:Disconnect() end) end
+        if watchConn then watchConn:Disconnect() end
+        restoreAll()
+    end)
+end
+
+-- ============================================
+-- 模块 12: 无后座
+-- ============================================
+do
+    local NOOP = function() end
+    local ZERO_V3 = Vector3.new()
+    local recoilPatchedMTs = {}
+    local recoilPatchedInsts = setmetatable({}, { __mode = "k" })
+    local recoilZeroLoop
+    local function isSpringLike(v)
+        if type(v) ~= "table" then return false end
+        if rawget(v,"_position0") or rawget(v,"_velocity0") or rawget(v,"_damper") or rawget(v,"_speed") or rawget(v,"Accelerate") then return true end
+        return false
+    end
+    local function patchInstance(inst)
+        if type(inst) ~= "table" or recoilPatchedInsts[inst] or not isSpringLike(inst) then return false end
+        recoilPatchedInsts[inst] = true
+        local acc = rawget(inst,"Accelerate"); if type(acc)=="function" and acc~=NOOP then pcall(function() rawset(inst,"Accelerate",NOOP) end) end
+        local pv = rawget(inst,"_positionVelocity"); if type(pv)=="function" then pcall(function() rawset(inst,"_positionVelocity",function() return ZERO_V3,ZERO_V3 end) end) end
+        return true
+    end
+    local function startZeroLoop()
+        if recoilZeroLoop then return end
+        recoilZeroLoop = spawn(function()
+            local frame = 0
+            while recoilEnabled do
+                frame = frame + 1
+                if frame % 3 == 0 then
+                    for inst in pairs(recoilPatchedInsts) do
+                        pcall(function()
+                            rawset(inst,"_position0",ZERO_V3); rawset(inst,"_velocity0",ZERO_V3)
+                            rawset(inst,"_target",ZERO_V3); rawset(inst,"_position",ZERO_V3); rawset(inst,"_velocity",ZERO_V3)
+                        end)
+                    end
+                end
+                RunService.Heartbeat:Wait()
+            end
+            recoilZeroLoop = nil
+        end)
+    end
+    local function stopZeroLoop()
+        if recoilZeroLoop then pcall(function() recoilZeroLoop:Disconnect() end); recoilZeroLoop = nil end
+    end
+    local function rescan()
+        pcall(function() for _, v in pairs(getgc(true)) do if isSpringLike(v) then patchInstance(v) end end end)
+    end
+    local function setup()
+        if not recoilEnabled then stopZeroLoop(); recoilPatchedInsts = setmetatable({},{__mode="k"}); recoilPatchedMTs = {}; return end
+        rescan(); startZeroLoop()
+    end
+    toggleBase("无后坐力", nil, false, function(v) recoilEnabled = v; setup() end)
+    lp.CharacterAdded:Connect(function() wait(1); if recoilEnabled then rescan() end end)
+    table.insert(cleanupFns, function() recoilEnabled = false; stopZeroLoop() end)
+end
+
+-- ============================================
+-- 模块 13: 聊天框强制显示
+-- ============================================
+do
+    local chatForceThread, chatForceConn, chatForceOrig = nil, nil, nil
+    local function getCfg() return TextChatService:FindFirstChild("ChatWindowConfiguration") end
+    local function startGuard()
+        if chatForceThread then return end
+        local cfg = getCfg(); chatForceOrig = cfg and cfg.Enabled or false
+        if cfg then
+            chatForceConn = cfg:GetPropertyChangedSignal("Enabled"):Connect(function()
+                if chatForceEnabled and not cfg.Enabled then cfg.Enabled = true end
+            end)
+        end
+        chatForceThread = spawn(function()
+            while chatForceEnabled do
+                local c = getCfg(); if c and not c.Enabled then c.Enabled = true end
+                wait(0.25)
+            end
+            chatForceThread = nil
+        end)
+    end
+    local function stopGuard()
+        chatForceEnabled = false; chatForceThread = nil
+        if chatForceConn then pcall(function() chatForceConn:Disconnect() end); chatForceConn = nil end
+        local cfg = getCfg(); if cfg and chatForceOrig ~= nil then cfg.Enabled = chatForceOrig end
+        chatForceOrig = nil
+    end
+    toggleBase("聊天框强制显示", nil, false, function(v)
+        chatForceEnabled = v
+        if v then startGuard(); local cfg = getCfg(); if cfg then cfg.Enabled = true end
+        else stopGuard() end
+    end)
+    table.insert(cleanupFns, function() stopGuard() end)
+end
+
+-- ============================================
+-- 模块 14: 强制爆头
+-- ============================================
+do
+    local fhHookInstalled, fhOrigInvoke, fhNetwork = false, nil, nil
+    do
+        local m = ReplicatedStorage
+        for _, seg in ipairs({"Assets","Modules","Network"}) do m = m and m:FindFirstChild(seg) end
+        if m then local ok, r = pcall(require, m); if ok and type(r)=="table" then fhNetwork = r end end
+    end
+    local function fhForceHeadshot(hitData)
+        if type(hitData) ~= "table" then return false end
+        local hum = hitData[1]; local part = hitData[2]
+        if not hum or not hum:IsA("Humanoid") then return false end
+        if hum.Health <= 0 then return false end
+        local char = hum.Parent; if not char or not char.Parent then return false end
+        if _playerChars[char] then return false end
+        if char:GetAttribute("FriendlyToFlare") == true then return false end
+        local head = char:FindFirstChild("Head"); if not head then return false end
+        if part == head then return false end
+        local cam = Workspace.CurrentCamera; local camPos = cam and cam.CFrame.Position
+        local normal = hitData[4]
+        if typeof(normal) ~= "Vector3" then
+            local fp = hitData[5]
+            if typeof(fp) == "Vector3" then normal = (head.Position - fp).Unit else normal = Vector3.new(0,1,0) end
+        end
+        hitData[2] = head; hitData[3] = head.Position
+        if camPos then hitData[5] = camPos end
+        local root = hum.RootPart or char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local cf = CFrame.new(head.Position, head.Position - normal * 1.5)
+            hitData[7] = root.CFrame:ToObjectSpace(cf)
+        end
+        return true
+    end
+    local function installFH()
+        if fhHookInstalled or not fhNetwork or type(fhNetwork.InvokeServer) ~= "function" then return end
+        fhHookInstalled = true; fhOrigInvoke = fhNetwork.InvokeServer
+        local w = function(self, action, ...)
+            if action == "hit" and forceHeadshotEnabled then
+                local args = {...}; fhForceHeadshot(args[3])
+                return fhOrigInvoke(self, action, args[1], args[2], args[3])
+            end
+            return fhOrigInvoke(self, action, ...)
+        end
+        local ok = pcall(function() rawset(fhNetwork, "InvokeServer", w) end)
+        if not ok then pcall(function() fhNetwork.InvokeServer = w end) end
+    end
+    local function uninstallFH()
+        if not fhHookInstalled then return end
+        fhHookInstalled = false
+        if fhNetwork and fhOrigInvoke then pcall(function() fhNetwork.InvokeServer = fhOrigInvoke end) end
+        fhOrigInvoke = nil
+    end
+    local fhBtn, fhSetState = toggleBase("强制爆头", nil, false, function(v)
+        forceHeadshotEnabled = v
+        if v then installFH() else uninstallFH() end
+    end)
+    _G._ExamFH = _G._ExamFH or {}
+    _G._ExamFH.forceOffFn = function() if fhSetState then pcall(function() fhSetState(false) end) end end
+    table.insert(cleanupFns, function() uninstallFH() end)
+end
+
+-- ============================================
+-- 模块 15: 自动 QTE
+-- ============================================
+do
+    local qteModule, qteInputRemote = nil, nil
+    do
+        local m = ReplicatedStorage
+        for _, seg in ipairs({"Assets","Modules","QTEManager"}) do m = m and m:FindFirstChild(seg) end
+        if m then local ok, r = pcall(require, m); if ok and type(r)=="table" then qteModule = r end end
+        local events = ReplicatedStorage:FindFirstChild("Events")
+        if events then qteInputRemote = events:FindFirstChild("QTEInput") end
+    end
+    local qteConn, lastQteTick = nil, 0
+    local function getRequested()
+        if qteModule and type(qteModule.GetCurrentRequestedInput) == "function" then
+            local ok, res = pcall(qteModule.GetCurrentRequestedInput); if ok then return res end
+        end
+        return nil
+    end
+    local function fireHandleInput(keyName)
+        if not qteModule or type(qteModule.HandleInput) ~= "function" then return end
+        local now = tick(); if now - lastQteTick < 0.1 then return end
+        lastQteTick = now; pcall(qteModule.HandleInput, keyName)
+    end
+    local function onQTEInput(keyName)
+        if not autoQTEEnabled then return end
+        task.spawn(function()
+            task.wait(0.05)
+            local cur = getRequested()
+            fireHandleInput(cur or keyName)
+        end)
+    end
+    local function setup()
+        if qteConn then pcall(function() qteConn:Disconnect() end); qteConn = nil end
+        if not autoQTEEnabled or not qteInputRemote then return end
+        qteConn = qteInputRemote.OnClientEvent:Connect(onQTEInput)
+    end
+    toggleBase("自动 QTE", nil, false, function(v) autoQTEEnabled = v; setup() end)
+    table.insert(cleanupFns, function() if qteConn then pcall(function() qteConn:Disconnect() end) end end)
+end
+
+-- ============================================
+-- 模块 16: 霰弹枪连发
+-- ============================================
+do
+    local animatorConn
+    local function isTargetAnim(track)
+        local an = track.Animation; if not an then return false end
+        local id = tostring(an.AnimationId or ""):match("%d+")
+        if not id then return false end
+        return SHOTGUN_PUMP_IDS[id] == true
+    end
+    local function restoreTracks()
+        local char = lp.Character; if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+        local ok, tracks = pcall(function() return hum:GetPlayingAnimationTracks() end)
+        if not ok or type(tracks) ~= "table" then return end
+        for _, t in ipairs(tracks) do
+            local an = t.Animation
+            if an then
+                local id = tostring(an.AnimationId or ""):match("%d+")
+                if id and SHOTGUN_PUMP_IDS[id] then pcall(function() t:AdjustSpeed(1) end) end
+            end
+        end
+    end
+    local function setupAnimator()
+        if animatorConn then pcall(function() animatorConn:Disconnect() end); animatorConn = nil end
+        local char = lp.Character; if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+        local animator = hum:FindFirstChildOfClass("Animator"); if not animator then return end
+        animatorConn = animator.AnimationPlayed:Connect(function(track)
+            if not shotgunNoPumpEnabled then return end
+            if isTargetAnim(track) then pcall(function() track:AdjustSpeed(SHOTGUN_SPEED_MULT) end) end
+        end)
+    end
+    toggleBase("霰弹枪连发", nil, false, function(v)
+        shotgunNoPumpEnabled = v
+        if v then setupAnimator()
+        else if animatorConn then pcall(function() animatorConn:Disconnect() end); animatorConn = nil end; pcall(restoreTracks) end
+    end)
+    lp.CharacterAdded:Connect(function() wait(1); if shotgunNoPumpEnabled then setupAnimator() end end)
+    table.insert(cleanupFns, function()
+        shotgunNoPumpEnabled = false
+        if animatorConn then pcall(function() animatorConn:Disconnect() end) end
+        pcall(restoreTracks)
+    end)
+end
+
+-- ============================================
+-- 模块 16.5: 修复盾牌滑铲
+-- ============================================
+do
+    local SLIDE_BADGE_ID = 3938313051889761
+    local origBadgeAsync, badgeHooked = nil, false
+    local trySlideFn, startSlideFn, origTrySlideFn, trySlideHooked = nil, nil, nil, false
+    local pushLoop, hudLoop
+    local function findPostureFrame()
+        local pg = lp:FindFirstChild("PlayerGui"); if not pg then return nil end
+        local gGui = pg:FindFirstChild("Gui"); if not gGui then return nil end
+        local posture = gGui:FindFirstChild("Posture")
+        if posture and posture:IsA("GuiObject") then return posture end
+    end
+    local function pushAttrs()
+        local char = lp.Character; if not char then return end
+        if noCDEnabled and noCDActiveUntil > tick() then return end
+        pcall(function() char:SetAttribute("RiotShieldEquipped", false) end)
+        for _, t in ipairs(char:GetChildren()) do
+            if t:IsA("Tool") then
+                local ok, v = pcall(function() return t:GetAttribute("RiotShieldTool") end)
+                if ok and v == true then pcall(function() t:SetAttribute("RiotShieldTool", false) end) end
+            end
+        end
+    end
+    local function startPush()
+        if pushLoop then return end
+        pushLoop = spawn(function()
+            while shieldFixEnabled do pcall(pushAttrs); wait(0.05) end
+            pushLoop = nil
+        end)
+    end
+    local function hookBadge()
+        if badgeHooked or not hookfunction then return end
+        if _G._shieldFixOrigBadge then badgeHooked = true; return end
+        origBadgeAsync = BadgeService.UserHasBadgeAsync
+        local ok = pcall(function()
+            hookfunction(BadgeService.UserHasBadgeAsync, function(self, uid, bid)
+                if bid == SLIDE_BADGE_ID then return true end
+                return origBadgeAsync(self, uid, bid)
+            end)
+        end)
+        if ok then badgeHooked = true; _G._shieldFixOrigBadge = origBadgeAsync end
+    end
+    local function findSlideFns()
+        trySlideFn, startSlideFn = nil, nil
+        if not getgc or not getinfo then return false end
+        local ok, gc = pcall(function() return getgc(true) end)
+        if not ok or type(gc) ~= "table" then return false end
+        for _, v in pairs(gc) do
+            if type(v) == "function" then
+                local ok2, info = pcall(function() return getinfo(v) end)
+                if ok2 and type(info) == "table" then
+                    local s = (info.source or ""):lower()
+                    if s:find("movementcontroller", 1, true) then
+                        local n = info.name or ""
+                        if n == "TrySlide" and not trySlideFn then trySlideFn = v
+                        elseif n == "StartSlide" and not startSlideFn then startSlideFn = v end
+                    end
+                end
+            end
+        end
+        return trySlideFn ~= nil and startSlideFn ~= nil
+    end
+    local function hookTrySlide()
+        if trySlideHooked then return end
+        if not trySlideFn or not startSlideFn then if not findSlideFns() then return end end
+        if not hookfunction then return end
+        origTrySlideFn = trySlideFn
+        local ok = pcall(function()
+            hookfunction(trySlideFn, function(...)
+                if not shieldFixEnabled then return origTrySlideFn(...) end
+                local char = lp.Character; if not char then return false end
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if not hum or hum.Health <= 0 then return false end
+                if hum:GetAttribute("sliding") then return false end
+                task.spawn(startSlideFn); return true
+            end)
+        end)
+        if ok then
+            trySlideHooked = true
+            _G._shieldFixTargetTrySlide = trySlideFn
+            _G._shieldFixOrigTrySlide = origTrySlideFn
+        end
+    end
+    local function restoreTrySlide()
+        if trySlideHooked and origTrySlideFn and hookfunction then
+            pcall(function() hookfunction(origTrySlideFn, origTrySlideFn) end); trySlideHooked = false
+        end
+        _G._shieldFixTargetTrySlide = nil; _G._shieldFixOrigTrySlide = nil
+    end
+    local function startHudFix()
+        if hudLoop then return end
+        hudLoop = spawn(function()
+            while shieldFixEnabled do
+                local char = lp.Character
+                if char then
+                    local state = char:GetAttribute("RiotShieldState")
+                    local active = state and state ~= "Inactive" and state ~= ""
+                    if active then
+                        local posture = findPostureFrame()
+                        if posture and not posture.Visible then pcall(function() posture.Visible = true end) end
+                    end
+                end
+                wait(0.05)
+            end
+            hudLoop = nil
+        end)
+    end
+    local function setup()
+        if shieldFixEnabled then hookBadge(); findSlideFns(); hookTrySlide(); startPush(); startHudFix()
+        else pushLoop = nil; hudLoop = nil; restoreTrySlide() end
+    end
+    toggleBase("修复盾牌滑铲/疾跑", nil, false, function(v) shieldFixEnabled = v; setup() end)
+    lp.CharacterAdded:Connect(function() wait(1); if shieldFixEnabled then findSlideFns(); hookTrySlide() end end)
+    table.insert(cleanupFns, function() shieldFixEnabled = false; pushLoop = nil; hudLoop = nil; restoreTrySlide() end)
+end
+
+-- ============================================
+-- 模块 16.6: 第一人称盾牌半透明
+-- ============================================
+do
+    local tracked, scanLoop, lastVM = {}, nil, nil
+    local function getViewmodel()
+        local cam = Workspace.CurrentCamera; if not cam then return nil end
+        return cam:FindFirstChild("RiotShieldViewmodel")
+    end
+    local function applyToVM(vm)
+        if not vm then return 0 end
+        local count = 0
+        for _, d in ipairs(vm:GetDescendants()) do
+            if d:IsA("BasePart") then
+                if tracked[d] == nil then tracked[d] = d.Transparency end
+                if tracked[d] < 0.95 then
+                    if math.abs(d.Transparency - shieldVMAlpha) > 0.01 then pcall(function() d.Transparency = shieldVMAlpha end) end
+                    count = count + 1
+                end
+            end
+        end
+        return count
+    end
+    local function restoreAll()
+        for p, orig in pairs(tracked) do if p and p.Parent then pcall(function() p.Transparency = orig end) end end
+        tracked = {}
+    end
+    local function startScanLoop()
+        if scanLoop then scanLoop:Disconnect(); scanLoop = nil end
+        local frameCount = 0
+        scanLoop = RunService.Heartbeat:Connect(function()
+            if not shieldVMEnabled then return end
+            local vm = getViewmodel()
+            if vm ~= lastVM then lastVM = vm; if vm then applyToVM(vm) end; return end
+            frameCount = frameCount + 1
+            if frameCount % 3 ~= 0 then return end
+            if vm then applyToVM(vm) end
+        end)
+    end
+    spawn(function()
+        while tipGui.Parent do
+            wait(0.5)
+            for p in pairs(tracked) do if not p or not p.Parent then tracked[p] = nil end end
+        end
+    end)
+    toggleBase("第一人称盾牌半透明", nil, false, function(v)
+        shieldVMEnabled = v
+        if v then
+            local vm = getViewmodel(); if vm then lastVM = vm; applyToVM(vm) end
+            startScanLoop()
+        else if scanLoop then scanLoop:Disconnect(); scanLoop = nil end; restoreAll(); lastVM = nil end
+    end)
+    TabBase:Input({
+        Title = "盾牌透明度 (0.00-0.99)",
+        Value = string.format("%.2f", shieldVMAlpha),
+        Callback = function(v)
+            local n = tonumber(v)
+            if n and n >= 0 and n <= 0.99 then
+                shieldVMAlpha = n
+                if shieldVMEnabled then local vm = getViewmodel(); if vm then applyToVM(vm) end end
+            end
+        end,
+    })
+    lp.CharacterAdded:Connect(function()
+        wait(1); tracked = {}; lastVM = nil
+        if shieldVMEnabled then local vm = getViewmodel(); if vm then lastVM = vm; applyToVM(vm) end end
+    end)
+    table.insert(cleanupFns, function() shieldVMEnabled = false; if scanLoop then scanLoop:Disconnect() end; restoreAll() end)
+end
+
+-- ============================================
+-- 模块 16.7: 无滑铲冷却
+-- ============================================
+do
+    local humConn, keyConn, slideGen, lastKeyTick = nil, nil, 0, 0
+    local function refreshCDNow()
+        local char = lp.Character; if not char then return end
+        noCDActiveUntil = tick() + 0.15
+        pcall(function() char:SetAttribute("RiotShieldEquipped", true) end)
+    end
+    local function bindHum()
+        if humConn then pcall(function() humConn:Disconnect() end); humConn = nil end
+        local char = lp.Character; if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+        humConn = hum:GetAttributeChangedSignal("sliding"):Connect(function()
+            if hum:GetAttribute("sliding") == true then
+                slideGen = slideGen + 1; local myGen = slideGen
+                task.spawn(function()
+                    task.wait(0.5)
+                    if slideGen ~= myGen or not noCDEnabled then return end
+                    local c = lp.Character; if not c then return end
+                    local h = c:FindFirstChildOfClass("Humanoid")
+                    if not h or not h:GetAttribute("sliding") then return end
+                    noCDActiveUntil = tick() + 0.15
+                    pcall(function() c:SetAttribute("RiotShieldEquipped", true) end)
+                end)
+            end
+        end)
+    end
+    local function bindKeyboard()
+        if keyConn then pcall(function() keyConn:Disconnect() end); keyConn = nil end
+        keyConn = UserInputService.InputBegan:Connect(function(input, gpe)
+            if not noCDEnabled or gpe then return end
+            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+            if input.KeyCode ~= Enum.KeyCode.C then return end
+            local now = tick(); if now - lastKeyTick < 0.3 then return end
+            lastKeyTick = now
+            task.spawn(function()
+                task.wait(0.15)
+                local char = lp.Character; if not char then return end
+                local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+                if not hum:GetAttribute("sliding") and hum.MoveDirection.Magnitude > 0.1 then
+                    noCDActiveUntil = tick() + 0.15
+                    pcall(function() char:SetAttribute("RiotShieldEquipped", true) end)
+                end
+            end)
+        end)
+    end
+    spawn(function()
+        while tipGui.Parent do
+            wait(0.05)
+            if noCDEnabled and noCDActiveUntil > 0 and noCDActiveUntil <= tick() then
+                local char = lp.Character
+                if char then pcall(function() char:SetAttribute("RiotShieldEquipped", false) end) end
+                noCDActiveUntil = 0
+            end
+        end
+    end)
+    toggleBase("实验型无滑铲冷却（会导致bug）", nil, false, function(v)
+        noCDEnabled = v
+        if v then bindHum(); bindKeyboard(); refreshCDNow()
+        else
+            noCDActiveUntil = 0
+            if humConn then pcall(function() humConn:Disconnect() end); humConn = nil end
+            if keyConn then pcall(function() keyConn:Disconnect() end); keyConn = nil end
+            local char = lp.Character; if char then pcall(function() char:SetAttribute("RiotShieldEquipped", false) end) end
+        end
+    end)
+    lp.CharacterAdded:Connect(function() wait(1); if noCDEnabled then bindHum(); bindKeyboard(); refreshCDNow() end end)
+    table.insert(cleanupFns, function()
+        noCDEnabled = false; noCDActiveUntil = 0
+        if humConn then pcall(function() humConn:Disconnect() end) end
+        if keyConn then pcall(function() keyConn:Disconnect() end) end
+        local char = lp.Character; if char then pcall(function() char:SetAttribute("RiotShieldEquipped", false) end) end
+    end)
+end
+
+-- ============================================
+-- 模块 17: 魔法子弹 + 自动开火
+-- ============================================
+do
+    local mbAimPartIndex, mbFovRadius, mbWorldDistMax = 1, 200, 200
+    local mbBBSizeStuds, mbStudsOffsetY = 2.0, 0.8
+    local mbShowBox, mbRequireVisible, mbShowFovCircle, mbOnlyWhenLocked = true, true, true, true
+    local autoFireEnabled = false
+    local conns, fireCount, autoFireStatus = {}, 0, "关"
+    local reloadPauseUntil, reloadWindowActive, reloadWindowEnd, emergencyCooldownUntil, qteLockUntil = 0, false, 0, 0, 0
+    local mbShowRadiusCircle, radiusMode, RADIUS_LIMIT = false, "line", 500
+    local RING_SEGMENTS = 24
+    local radiusRingParts, radiusFacePart, wasTooLarge = {}, nil, false
+    local autoFireBtn
+    local clipMaxByTool, clipMaxTickByTool = {}, {}
+    local EMERGENCY_SKIP_RATIO, CLIP_MAX_TTL = 0.7, 30
+    local function getTool() local c=lp.Character; return c and c:FindFirstChildWhichIsA("Tool") end
+    local function getClip()
+        local tool = getTool(); if not tool then return nil end
+        local pg = lp:FindFirstChild("PlayerGui"); if not pg then return nil end
+        local ui = pg:FindFirstChild(tool.Name); if not ui then return nil end
+        local data = ui:FindFirstChild("Data"); if not data then return nil end
+        local clip = data:FindFirstChild("clip")
+        if not clip or not clip:IsA("TextLabel") then return nil end
+        local ok, txt = pcall(function() return clip.Text end); if not ok then return nil end
+        if txt == "--" then return -1 end
+        local n = tonumber(txt)
+        if n and n > 0 then
+            local now = tick(); local lastT = clipMaxTickByTool[tool.Name]
+            if lastT and (now-lastT) > CLIP_MAX_TTL then clipMaxByTool[tool.Name]=nil; clipMaxTickByTool[tool.Name]=nil end
+            if n > (clipMaxByTool[tool.Name] or 0) then clipMaxByTool[tool.Name]=n; clipMaxTickByTool[tool.Name]=now end
+        end
+        return n
+    end
+    local function isReloading()
+        local tool = getTool(); if not tool then return nil end
+        local ok, v = pcall(function() return tool:GetAttribute("Reloading") end)
+        return ok and v or nil
+    end
+    local _busyCache, BUSY_CACHE_TTL = {}, 0.15
+    local function isBusy(m)
+        if not m then return false end
+        local now = tick(); local c = _busyCache[m]
+        if c and (now-c.t) < BUSY_CACHE_TTL then return c.v end
+        local v = m:FindFirstChild("BeingExecuted") ~= nil
+        _busyCache[m] = { v=v, t=now }
+        return v
+    end
+    local LOW_PRIORITY_NAMES = { GrabbyMutant = true }
+    local DORMANT_NAMES = { Leaper = true, SIN = true }
+    local BOSS_DOWNED_NAMES = { SIN=true,Chimera=true,Gilbert=true,Riser=true,Riser1=true,Riser2=true,Riser3=true,Riser4=true,Riser5=true,Mikhail=true,Leaper=true }
+    local function isLowPriority(m) return m and LOW_PRIORITY_NAMES[m.Name] == true end
+    local function isDormant(m)
+        if not m or not DORMANT_NAMES[m.Name] then return false end
+        local ca = m:FindFirstChild("CanAttack")
+        if not ca or not ca:IsA("ValueBase") then return true end
+        local ok, v = pcall(function() return ca.Value end)
+        return (not ok) or v ~= true
+    end
+    local function isDowned(m)
+        if not m then return true end
+        local hum = m:FindFirstChildOfClass("Humanoid"); if not hum then return true end
+        if hum.Health <= 0 then return true end
+        if not BOSS_DOWNED_NAMES[m.Name] then return false end
+        if m:FindFirstChildOfClass("ForceField") or hum:FindFirstChildOfClass("ForceField") then return true end
+        if m:FindFirstChild("SIN_FORCEFIELD") or m:FindFirstChild("ExposeForceField") or m:FindFirstChild("DeathForceField") then return true end
+        if hum.PlatformStand == true then return true end
+        return false
+    end
+    local function releaseFire()
+        local tool = getTool(); if not tool then return end
+        pcall(function() tool:Activate() end); pcall(function() tool:Deactivate() end)
+        if getconnections then
+            local ok, list = pcall(getconnections, tool.Deactivated)
+            if ok and type(list) == "table" then
+                for _, c in ipairs(list) do
+                    local fn = nil
+                    pcall(function() fn = c.Function end)
+                    if type(fn) ~= "function" then pcall(function() fn = c["function"] end) end
+                    if type(fn) == "function" then pcall(fn) end
+                end
+            end
+        end
+    end
+    local function scanConnsFresh()
+        local Mouse = lp:GetMouse(); if not Mouse or not getconnections then return end
+        local ok, list = pcall(getconnections, Mouse.Button1Down); if not ok or type(list) ~= "table" then return end
+        local newConns = {}
+        for _, c in ipairs(list) do
+            local fn = nil
+            pcall(function() fn = c.Function end)
+            if type(fn) ~= "function" then pcall(function() fn = c["function"] end) end
+            if type(fn) == "function" and getinfo then
+                local ok2, info = pcall(getinfo, fn)
+                if ok2 and type(info) == "table" then
+                    local src = (info.source or ""):lower()
+                    if src:find("client") or src:find("backpack") then table.insert(newConns, { conn=c, info=info }) end
+                end
+            end
+        end
+        if #newConns > 0 then conns = newConns end
+    end
+    local function doFireOnce(isEmergency)
+        local tool = getTool(); if not tool then return false, "无工具" end
+        if not isEmergency then
+            local clip = getClip()
+            if clip == nil then return false, "无子弹UI" end
+            if clip == -1 then return false, "子弹--" end
+            if clip <= 0 then return false, "子弹=0" end
+        end
+        scanConnsFresh()
+        if #conns == 0 then return false, "无handler" end
+        releaseFire()
+        for _, e in ipairs(conns) do
+            local fn = nil
+            pcall(function() fn = e.conn.Function end)
+            if type(fn) == "function" then pcall(fn) end
+        end
+        releaseFire()
+        if isEmergency then return true, "紧急开火!" end
+        return true, "开火"
+    end
+    local AIM_PARTS = {
+        { name="Head", label="头部" },{ name="Torso", label="躯干" },
+        { name="Left Arm", label="左臂" },{ name="Right Arm", label="右臂" },
+        { name="Left Leg", label="左腿" },{ name="Right Leg", label="右腿" },
+    }
+    local function getAimPart(model)
+        if not model then return nil end
+        local info = AIM_PARTS[mbAimPartIndex]
+        if not info then return model:FindFirstChild("Head") end
+        local name = info.name
+        if name == "Head" then return model:FindFirstChild("Head") end
+        if name == "Torso" then return model:FindFirstChild("UpperTorso") or model:FindFirstChild("Torso") end
+        local aliases = {
+            ["Left Arm"]={"LeftUpperArm","Left Arm"},["Right Arm"]={"RightUpperArm","Right Arm"},
+            ["Left Leg"]={"LeftUpperLeg","Left Leg"},["Right Leg"]={"RightUpperLeg","Right Leg"},
+        }
+        local list = aliases[name]
+        if list then for _, n in ipairs(list) do local p=model:FindFirstChild(n); if p then return p end end end
+        return model:FindFirstChild(name)
+    end
+    local mbNetwork = nil
+    do
+        local m = ReplicatedStorage
+        for _, seg in ipairs({"Assets","Modules","Network"}) do m = m and m:FindFirstChild(seg) end
+        if m then local ok, r = pcall(require, m); if ok and type(r) == "table" then mbNetwork = r end end
+    end
+    local mbRaycastPath = ReplicatedStorage
+    for _, seg in ipairs({"Assets","Modules","Raycast"}) do mbRaycastPath = mbRaycastPath and mbRaycastPath:FindFirstChild(seg) end
+    local function isAlive(m)
+        if not m or not m.Parent then return false end
+        local hum = m:FindFirstChildOfClass("Humanoid")
+        return hum and hum.Health > 0
+    end
+    local function isHostile(m)
+        if not m or not m.Parent then return false end
+        if m == lp.Character then return false end
+        if _playerChars[m] then return false end
+        if m:GetAttribute("FriendlyToFlare") == true then return false end
+        return true
+    end
+    local function isPointVisible(origin, targetPos, targetModel, excludeBase)
+        local dir = targetPos - origin; local dist = dir.Magnitude
+        if dist < 0.5 then return true end
+        local dirUnit = dir.Unit
+        local exclude = {}
+        for _, v in ipairs(excludeBase) do table.insert(exclude, v) end
+        local curOrigin = origin; local remaining = dist
+        for _ = 1, 8 do
+            local rp = RaycastParams.new()
+            rp.FilterType = Enum.RaycastFilterType.Exclude
+            rp.FilterDescendantsInstances = exclude
+            rp.IgnoreWater = true
+            local r = Workspace:Raycast(curOrigin, dirUnit * remaining, rp)
+            if not r then return true end
+            if r.Instance:IsDescendantOf(targetModel) then return true end
+            local inst = r.Instance
+            if inst:IsA("BasePart") then
+                local skip = false
+                local ln = string.lower(inst.Name)
+                if pierceShieldEnabled and (ln:find("shield",1,true) or ln:find("riot",1,true)) then skip = true
+                elseif pierceHelmetEnabled and (ln:find("helmet",1,true) or ln:find("helm",1,true) or ln:find("visor",1,true)) then skip = true
+                else
+                    local mdl = inst:FindFirstAncestorOfClass("Model")
+                    if mdl and mdl ~= lp.Character then
+                        if pierceTeammateEnabled and Players:GetPlayerFromCharacter(mdl) then skip = true
+                        elseif pierceCorpseEnabled then
+                            local h = mdl:FindFirstChildOfClass("Humanoid")
+                            if h and h.Health <= 0 then skip = true end
+                        end
+                    end
+                end
+                if skip then
+                    table.insert(exclude, inst)
+                    local adv = (r.Position - curOrigin).Magnitude + 0.05
+                    curOrigin = r.Position + dirUnit * 0.05
+                    remaining = remaining - adv
+                    if remaining <= 0 then return true end
+                elseif inst.CanCollide then return false
+                elseif inst.Transparency >= 0.95 then
+                    table.insert(exclude, inst)
+                    local adv = (r.Position - curOrigin).Magnitude + 0.05
+                    curOrigin = r.Position + dirUnit * 0.05
+                    remaining = remaining - adv
+                    if remaining <= 0 then return true end
+                else return false end
+            else return false end
+        end
+        return true
+    end
+    local mbFovCircleGui, mbFovCircleImg
+    local function ensureFov()
+        if not magicBulletEnabled then return end
+        if mbFovCircleGui and mbFovCircleGui.Parent then return end
+        mbFovCircleGui = Instance.new("ScreenGui")
+        mbFovCircleGui.Name = "ForceHS_FOVCircle"
+        mbFovCircleGui.ResetOnSpawn = false
+        mbFovCircleGui.IgnoreGuiInset = true
+        mbFovCircleGui.DisplayOrder = 100
+        mbFovCircleGui.Parent = tipGui.Parent or CoreGui
+        mbFovCircleImg = Instance.new("Frame")
+        mbFovCircleImg.AnchorPoint = Vector2.new(0.5, 0.5)
+        mbFovCircleImg.Position = UDim2.new(0.5, 0, 0.5, 0)
+        mbFovCircleImg.BackgroundTransparency = 1
+        mbFovCircleImg.BorderSizePixel = 0
+        mbFovCircleImg.Parent = mbFovCircleGui
+        Instance.new("UICorner", mbFovCircleImg).CornerRadius = UDim.new(1, 0)
+        local s = Instance.new("UIStroke", mbFovCircleImg)
+        s.Thickness = 1; s.Color = Color3.fromRGB(120,255,120); s.Transparency = 0.35
+    end
+    local function updateFov()
+        if not mbFovCircleImg then return end
+        if magicBulletEnabled and mbShowFovCircle and mbTargetMode ~= 3 then
+            mbFovCircleImg.Visible = true
+            mbFovCircleImg.Size = UDim2.new(0, mbFovRadius*2, 0, mbFovRadius*2)
+            mbFovCircleImg.Position = UDim2.new(0.5, 0, 0.5, 0)
+        else mbFovCircleImg.Visible = false end
+    end
+    local function destroyFov()
+        if mbFovCircleGui then pcall(function() mbFovCircleGui:Destroy() end) end
+        mbFovCircleGui = nil; mbFovCircleImg = nil
+    end
+    local lastFindTick, cachedTarget, findLastReason = 0, nil, "init"
+    local function findTarget()
+        local now = tick(); if now - lastFindTick < 0.016 then return cachedTarget end
+        lastFindTick = now
+        local myChar = lp.Character
+        local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myHrp then cachedTarget=nil; findLastReason="no-hrp"; return nil end
+        local cam = Workspace.CurrentCamera; if not cam then cachedTarget=nil; findLastReason="no-cam"; return nil end
+        local vs = cam.ViewportSize
+        local cx, cy = vs.X/2, vs.Y/2
+        local myPos = myHrp.Position
+        local r2 = mbFovRadius * mbFovRadius
+        local best, bestScreenD2, bestWorldD, bestPrio = nil, math.huge, math.huge, 99
+        local camPos = cam.CFrame.Position
+        local excludeVis = { lp.Character, Workspace.Terrain, cam }
+        local vms = Workspace:FindFirstChild("Viewmodels")
+        if vms then table.insert(excludeVis, vms) end
+        local candidates, visBlocked, outFov, downedSkip = 0, 0, 0, 0
+        for _, fn in ipairs(AI_CONTAINERS) do
+            local folder = Workspace:FindFirstChild(fn)
+            if folder then
+                for _, m in ipairs(folder:GetChildren()) do
+                    if m ~= myChar and m:IsA("Model") and isAlive(m) and isHostile(m) then
+                        if isDormant(m) or isDowned(m) or isBusy(m) then downedSkip = downedSkip + 1
+                        else
+                            candidates = candidates + 1
+                            local aimPart = getAimPart(m)
+                            local head = m:FindFirstChild("Head")
+                            if aimPart and head then
+                                local wd = (aimPart.Position - myPos).Magnitude
+                                if wd <= mbWorldDistMax then
+                                    local screenD2, skipThis = nil, false
+                                    if mbTargetMode ~= 3 then
+                                        local s, onScreen = cam:WorldToViewportPoint(head.Position)
+                                        if onScreen and s.Z > 0 then
+                                            local dx, dy = s.X-cx, s.Y-cy
+                                            screenD2 = dx*dx + dy*dy
+                                            if screenD2 > r2 then outFov = outFov + 1; skipThis = true end
+                                        else outFov = outFov + 1; skipThis = true end
+                                    end
+                                    if not skipThis then
+                                        local visible = true
+                                        if mbRequireVisible then visible = isPointVisible(camPos, aimPart.Position, m, excludeVis) end
+                                        if not visible then visBlocked = visBlocked + 1
+                                        else
+                                            local prio = isLowPriority(m) and 1 or 0
+                                            local accept = false
+                                            if prio < bestPrio then accept = true
+                                            elseif prio == bestPrio then
+                                                if mbTargetMode == 3 then accept = wd < bestWorldD
+                                                elseif mbTargetMode == 1 then accept = screenD2 ~= nil and screenD2 < bestScreenD2
+                                                else accept = wd < bestWorldD end
+                                            end
+                                            if accept then
+                                                bestPrio = prio
+                                                if mbTargetMode == 1 and screenD2 then bestScreenD2 = screenD2 else bestWorldD = wd end
+                                                best = { model=m, head=head, aimPart=aimPart }
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if best then findLastReason = "locked"
+        elseif candidates == 0 and downedSkip > 0 then findLastReason = "all-downed"
+        elseif candidates == 0 then findLastReason = "no-hostiles"
+        elseif visBlocked == candidates then findLastReason = "all-blocked"
+        elseif outFov == candidates - visBlocked then findLastReason = "all-outFOV"
+        else findLastReason = "no-target" end
+        cachedTarget = best; return best
+    end
+    local function destroyRadiusRing()
+        for _, p in ipairs(radiusRingParts) do if p and p.Parent then pcall(function() p:Destroy() end) end end
+        radiusRingParts = {}
+    end
+    local function destroyRadiusFace()
+        if radiusFacePart and radiusFacePart.Parent then pcall(function() radiusFacePart:Destroy() end) end
+        radiusFacePart = nil
+    end
+    local function destroyAllRadius() destroyRadiusRing(); destroyRadiusFace() end
+    local function ensureRadiusRing()
+        if #radiusRingParts == RING_SEGMENTS and radiusRingParts[1] and radiusRingParts[1].Parent then return radiusRingParts end
+        destroyRadiusRing()
+        for i = 1, RING_SEGMENTS do
+            local p = Instance.new("Part")
+            p.Name = "ExamRadiusRing"
+            p.Size = Vector3.new(0.4, 0.05, 1)
+            p.Material = Enum.Material.SmoothPlastic
+            p.Color = Color3.fromRGB(120,255,120)
+            p.Transparency = 1
+            p.CanCollide=false; p.CanQuery=false; p.CanTouch=false; p.Anchored=true; p.CastShadow=false
+            p.Parent = Workspace
+            local sg = Instance.new("SurfaceGui")
+            sg.Name="Line"; sg.Face=Enum.NormalId.Top
+            sg.SizingMode=Enum.SurfaceGuiSizingMode.PixelsPerStud; sg.PixelsPerStud=40
+            sg.AlwaysOnTop=true; sg.LightInfluence=0; sg.Adornee=p; sg.Parent=p
+            local f = Instance.new("Frame")
+            f.Size=UDim2.new(1,0,1,0); f.BackgroundColor3=Color3.fromRGB(120,255,120)
+            f.BackgroundTransparency=0.25; f.BorderSizePixel=0; f.Parent=sg
+            table.insert(radiusRingParts, p)
+        end
+        return radiusRingParts
+    end
+    local function ensureRadiusFace()
+        if radiusFacePart and radiusFacePart.Parent then return radiusFacePart end
+        local p = Instance.new("Part")
+        p.Name="ExamRadiusFace"; p.Shape=Enum.PartType.Cylinder
+        p.Size=Vector3.new(0.05,1,1); p.Material=Enum.Material.Neon
+        p.Color=Color3.fromRGB(120,255,120); p.Transparency=0.9
+        p.CanCollide=false; p.CanQuery=false; p.CanTouch=false; p.Anchored=true; p.CastShadow=false
+        p.Parent=Workspace; radiusFacePart=p; return p
+    end
+    local function updateRadiusDisplay()
+        if not magicBulletEnabled then destroyAllRadius(); wasTooLarge=false; return end
+        if not mbShowRadiusCircle or mbTargetMode ~= 3 then destroyAllRadius(); wasTooLarge=false; return end
+        if mbWorldDistMax > RADIUS_LIMIT then
+            destroyAllRadius()
+            if not wasTooLarge then
+                wasTooLarge = true
+                task.spawn(function() showCountdownTip("360° 锁定范围过大，已关闭范围显示（上限 "..RADIUS_LIMIT.."）", 10) end)
+            end
+            return
+        else wasTooLarge = false end
+        local myChar = lp.Character; if not myChar then destroyAllRadius(); return end
+        local hum = myChar:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then destroyAllRadius(); return end
+        local myHrp = myChar:FindFirstChild("HumanoidRootPart"); if not myHrp then destroyAllRadius(); return end
+        local r = mbWorldDistMax
+        local basePos = myHrp.Position - Vector3.new(0, 2.5, 0)
+        if radiusMode == "line" then
+            destroyRadiusFace()
+            local parts = ensureRadiusRing()
+            local segLen = 2*r*math.sin(math.pi/RING_SEGMENTS) + 0.05
+            for i, p in ipairs(parts) do
+                local ang = (i-1)/RING_SEGMENTS*math.pi*2
+                p.Size = Vector3.new(0.4, 0.05, segLen)
+                p.CFrame = CFrame.new(basePos + Vector3.new(math.cos(ang)*r, 0, math.sin(ang)*r)) * CFrame.Angles(0, -ang, 0)
+            end
+        else
+            destroyRadiusRing()
+            local p = ensureRadiusFace()
+            local d = r*2
+            p.Size = Vector3.new(0.05, d, d)
+            p.CFrame = CFrame.new(basePos) * CFrame.Angles(0, 0, math.rad(90))
+        end
+    end
+    local lockBB, lockTarget
+    local function destroyLockBB()
+        if lockBB and lockBB.Parent then pcall(function() lockBB:Destroy() end) end
+        lockBB, lockTarget = nil, nil
+    end
+    local function createLockBB(part)
+        local bb = Instance.new("BillboardGui")
+        bb.Name="Exam_MB_LockBB"; bb.Adornee=part
+        bb.Size=UDim2.new(mbBBSizeStuds,0,mbBBSizeStuds,0)
+        bb.StudsOffsetWorldSpace=Vector3.new(0,mbStudsOffsetY,0)
+        bb.AlwaysOnTop=true; bb.LightInfluence=0; bb.MaxDistance=mbWorldDistMax
+        bb.ResetOnSpawn=false; bb.Parent=part
+        local f = Instance.new("Frame", bb)
+        f.Name="BoxFrame"; f.Size=UDim2.new(1,0,1,0); f.AnchorPoint=Vector2.new(0.5,0.5)
+        f.Position=UDim2.new(0.5,0,0.5,0); f.BackgroundTransparency=1; f.BorderSizePixel=0
+        local s = Instance.new("UIStroke", f)
+        s.Color=Color3.fromRGB(120,255,120); s.Thickness=2; s.Transparency=0.05
+        local dot = Instance.new("Frame", bb)
+        dot.Name="CenterDot"; dot.Size=UDim2.new(0,4,0,4); dot.AnchorPoint=Vector2.new(0.5,0.5)
+        dot.Position=UDim2.new(0.5,0,0.5,0); dot.BackgroundColor3=Color3.fromRGB(120,255,120); dot.BorderSizePixel=0
+        Instance.new("UICorner", dot).CornerRadius=UDim.new(1,0)
+        spawn(function()
+            local deg = 0
+            while bb and bb.Parent do deg = (deg+5)%360; if f and f.Parent then f.Rotation=deg end; wait(0.03) end
+        end)
+        return bb
+    end
+    local function updateLockBB()
+        if not magicBulletEnabled or not mbShowBox then if lockBB and lockBB.Parent then lockBB.Enabled=false end; return end
+        local target = findTarget()
+        if not target then if lockBB and lockBB.Parent then lockBB.Enabled=false end; return end
+        local aimPart = target.aimPart
+        if not aimPart then if lockBB and lockBB.Parent then lockBB.Enabled=false end; return end
+        if lockTarget ~= target.model or not lockBB or not lockBB.Parent or lockBB.Adornee ~= aimPart then
+            if lockBB and lockBB.Parent then pcall(function() lockBB:Destroy() end) end
+            lockBB = createLockBB(aimPart); lockTarget = target.model
+        else lockBB.Enabled = true end
+    end
+    local mbOrigFire, mbOrigRaycastNew, mbOrigInvoke, mbRaycastModule, mbHookInstalled = nil, nil, nil, nil, false
+    local function getFirePos(tool)
+        if not tool or not tool:IsA("Tool") then return nil end
+        local core = tool:FindFirstChild("Handle") or tool:FindFirstChildWhichIsA("BasePart")
+        if not core then return nil end
+        local fp = core:FindFirstChild("FirePoint")
+        if fp and fp:IsA("Attachment") then return fp.WorldPosition end
+        return core.Position
+    end
+    local function forceAimPart(hitData)
+        if type(hitData) ~= "table" then return false end
+        local hum = hitData[1]; local part = hitData[2]
+        if not hum or not hum:IsA("Humanoid") then return false end
+        if hum.Health <= 0 then return false end
+        local char = hum.Parent; if not char or not char.Parent then return false end
+        if _playerChars[char] then return false end
+        if char:GetAttribute("FriendlyToFlare") == true then return false end
+        local aimPart = getAimPart(char); if not aimPart then return false end
+        if part == aimPart then return false end
+        local cam = Workspace.CurrentCamera; local camPos = cam and cam.CFrame.Position
+        local normal = hitData[4]
+        if typeof(normal) ~= "Vector3" then
+            local fp = hitData[5]
+            if typeof(fp) == "Vector3" then normal = (aimPart.Position - fp).Unit else normal = Vector3.new(0,1,0) end
+        end
+        hitData[2] = aimPart; hitData[3] = aimPart.Position
+        if camPos then hitData[5] = camPos end
+        local root = hum.RootPart or char:FindFirstChild("HumanoidRootPart")
+        if root then
+            local cf = CFrame.new(aimPart.Position, aimPart.Position - normal * 1.5)
+            hitData[7] = root.CFrame:ToObjectSpace(cf)
+        end
+        return true
+    end
+    local shieldCache, helmetCache, teammateCache, corpseCache = {list={},tick=0}, {list={},tick=0}, {list={},tick=0}, {list={},tick=0}
+    local function forEachModel(fn)
+        for _, fn2 in ipairs(AI_CONTAINERS) do
+            local folder = Workspace:FindFirstChild(fn2)
+            if folder then for _, m in ipairs(folder:GetChildren()) do if m:IsA("Model") then fn(m) end end end
+        end
+    end
+    local function collectShields()
+        local now = tick(); if now - shieldCache.tick < 1 and #shieldCache.list > 0 then return shieldCache.list end
+        shieldCache.tick = now; local list = {}
+        forEachModel(function(m)
+            for _, d in ipairs(m:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    local n = string.lower(d.Name)
+                    if n:find("shield",1,true) or n:find("riot",1,true) then table.insert(list, d) end
+                end
+            end
+        end)
+        shieldCache.list = list; return list
+    end
+    local function collectHelmets()
+        local now = tick(); if now - helmetCache.tick < 1 and #helmetCache.list > 0 then return helmetCache.list end
+        helmetCache.tick = now; local list = {}
+        forEachModel(function(m)
+            for _, d in ipairs(m:GetDescendants()) do
+                if d:IsA("BasePart") then
+                    local n = string.lower(d.Name)
+                    if n:find("helmet",1,true) or n:find("helm",1,true) or n:find("visor",1,true) then table.insert(list, d) end
+                end
+            end
+        end)
+        helmetCache.list = list; return list
+    end
+    local function collectTeammates()
+        local now = tick(); if now - teammateCache.tick < 1 and #teammateCache.list > 0 then return teammateCache.list end
+        teammateCache.tick = now; local list = {}
+        forEachModel(function(m)
+            if m ~= lp.Character and Players:GetPlayerFromCharacter(m) then
+                for _, d in ipairs(m:GetDescendants()) do if d:IsA("BasePart") then table.insert(list, d) end end
+            end
+        end)
+        teammateCache.list = list; return list
+    end
+    local function collectCorpses()
+        local now = tick(); if now - corpseCache.tick < 1 and #corpseCache.list > 0 then return corpseCache.list end
+        corpseCache.tick = now; local list = {}
+        forEachModel(function(m)
+            if m ~= lp.Character then
+                local hum = m:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health <= 0 then
+                    for _, d in ipairs(m:GetDescendants()) do if d:IsA("BasePart") then table.insert(list, d) end end
+                end
+            end
+        end)
+        corpseCache.list = list; return list
+    end
+    local function applyExtraFilter(behavior)
+        if type(behavior) ~= "table" then return end
+        local params = behavior.RaycastParams
+        if typeof(params) ~= "RaycastParams" then return end
+        if mbOnlyWhenLocked and not findTarget() then return end
+        local fdi = params.FilterDescendantsInstances
+        if type(fdi) ~= "table" then return end
+        local newFdi = {}
+        for _, v in ipairs(fdi) do table.insert(newFdi, v) end
+        if pierceShieldEnabled then for _, s in ipairs(collectShields()) do if s and s.Parent then table.insert(newFdi, s) end end end
+        if pierceHelmetEnabled then for _, s in ipairs(collectHelmets()) do if s and s.Parent then table.insert(newFdi, s) end end end
+        if pierceTeammateEnabled then for _, s in ipairs(collectTeammates()) do if s and s.Parent then table.insert(newFdi, s) end end end
+        if pierceCorpseEnabled then for _, s in ipairs(collectCorpses()) do if s and s.Parent then table.insert(newFdi, s) end end end
+        pcall(function() params.FilterDescendantsInstances = newFdi end)
+    end
+    local function installHook()
+        if mbHookInstalled then return end
+        mbHookInstalled = true
+        if mbNetwork and type(mbNetwork.InvokeServer) == "function" then
+            mbOrigInvoke = mbNetwork.InvokeServer
+            local w = function(self, action, ...)
+                if action == "hit" and magicBulletEnabled then
+                    local args = {...}; forceAimPart(args[3])
+                    return mbOrigInvoke(self, action, args[1], args[2], args[3])
+                end
+                return mbOrigInvoke(self, action, ...)
+            end
+            local ok = pcall(function() rawset(mbNetwork, "InvokeServer", w) end)
+            if not ok then pcall(function() mbNetwork.InvokeServer = w end) end
+        end
+        if mbNetwork and type(mbNetwork.FireServer) == "function" then
+            mbOrigFire = mbNetwork.FireServer
+            local w = function(self, action, ...)
+                if action == "fire" and magicBulletEnabled then
+                    local args = {...}
+                    local dirIdx = nil
+                    for i = #args, 1, -1 do if typeof(args[i]) == "Vector3" then dirIdx = i; break end end
+                    if dirIdx then
+                        local tool = nil
+                        for i = 1, #args do if typeof(args[i]) == "Instance" and args[i]:IsA("Tool") then tool = args[i]; break end end
+                        local target = findTarget()
+                        if target and target.aimPart then
+                            local firePos = getFirePos(tool)
+                            if firePos then
+                                local nd = target.aimPart.Position - firePos
+                                if nd.Magnitude > 0.1 then args[dirIdx] = nd.Unit end
+                            end
+                        end
+                    end
+                    return mbOrigFire(self, action, unpack(args))
+                end
+                return mbOrigFire(self, action, ...)
+            end
+            local ok = pcall(function() rawset(mbNetwork, "FireServer", w) end)
+            if not ok then pcall(function() mbNetwork.FireServer = w end) end
+        end
+        if mbRaycastPath then
+            local ok, rc = pcall(require, mbRaycastPath)
+            if ok and type(rc) == "table" and type(rc.new) == "function" then
+                mbRaycastModule = rc; mbOrigRaycastNew = rc.new
+                local wrapper = function(...)
+                    local inst = mbOrigRaycastNew(...)
+                    if type(inst) ~= "table" or rawget(inst, "__MB_Fire") then return inst end
+                    local origFire = inst.Fire
+                    if type(origFire) ~= "function" then return inst end
+                    rawset(inst, "__MB_Fire", true)
+                    rawset(inst, "Fire", function(self, origin, dir, velocity, behavior, ...)
+                        if magicBulletEnabled then
+                            pcall(function() applyExtraFilter(behavior) end)
+                            if typeof(dir) == "Vector3" then
+                                local target = findTarget()
+                                if target and target.aimPart then
+                                    local originV
+                                    if typeof(origin) == "Vector3" then originV = origin
+                                    elseif typeof(origin) == "Instance" then originV = origin.Position end
+                                    if originV then
+                                        local nd = target.aimPart.Position - originV
+                                        if nd.Magnitude > 0.1 then dir = nd.Unit end
+                                    end
+                                end
+                            end
+                        end
+                        return origFire(self, origin, dir, velocity, behavior, ...)
+                    end)
+                    return inst
+                end
+                local ok2 = pcall(function() rawset(rc, "new", wrapper) end)
+                if not ok2 then pcall(function() rc.new = wrapper end) end
+            end
+        end
+    end
+    local function uninstallHook()
+        if not mbHookInstalled then return end
+        mbHookInstalled = false
+        if mbNetwork and mbOrigInvoke then pcall(function() mbNetwork.InvokeServer = mbOrigInvoke end) end
+        if mbNetwork and mbOrigFire then pcall(function() mbNetwork.FireServer = mbOrigFire end) end
+        if mbRaycastModule and mbOrigRaycastNew then pcall(function() rawset(mbRaycastModule, "new", mbOrigRaycastNew) end) end
+        mbOrigInvoke = nil
+    end
+    local function mbSetup()
+        if magicBulletEnabled then ensureFov(); updateFov(); installHook()
+        else uninstallHook(); updateFov(); destroyAllRadius(); wasTooLarge=false
+            if autoFireEnabled then
+                autoFireEnabled = false
+                if autoFireBtn then autoFireBtn:SetTitle("自动开火: 关"); autoFireBtn:SetColor(Color3.fromRGB(70,70,70)) end
+                releaseFire(); autoFireStatus = "魔法子弹已关"
+            end
+        end
+    end
+    local mbBtn, mbSetState = toggleMagic("启用魔法子弹", nil, false, function(v)
+        magicBulletEnabled = v
+        if v and _G._ExamFH and _G._ExamFH.forceOffFn then pcall(_G._ExamFH.forceOffFn) end
+        mbSetup()
+    end)
+    _G._ExamMB = _G._ExamMB or {}
+    _G._ExamMB.magicOffFn = function() if mbSetState then pcall(function() mbSetState(false) end) end end
+    toggleMagic("显示 3D 头框", nil, true, function(v) mbShowBox = v; if not v then destroyLockBB() end end)
+    toggleMagic("掩体检测", nil, true, function(v)
+        mbRequireVisible = v
+        if not v then
+            cachedTarget = nil; lastFindTick = 0
+            if autoFireEnabled then
+                autoFireEnabled = false
+                if autoFireBtn then autoFireBtn:SetTitle("自动开火: 关"); autoFireBtn:SetColor(Color3.fromRGB(70,70,70)) end
+                releaseFire(); autoFireStatus = "掩体检测已关"
+            end
+        end
+    end)
+    toggleMagic("穿透盾牌", nil, true, function(v) pierceShieldEnabled = v; shieldCache.tick=0; shieldCache.list={} end)
+    toggleMagic("穿透SIN头盔", nil, true, function(v) pierceHelmetEnabled = v; helmetCache.tick=0; helmetCache.list={} end)
+    toggleMagic("穿透队友", nil, true, function(v) pierceTeammateEnabled = v; teammateCache.tick=0; teammateCache.list={} end)
+    toggleMagic("穿透尸体", nil, true, function(v) pierceCorpseEnabled = v; corpseCache.tick=0; corpseCache.list={} end)
+    toggleMagic("显示FOV圈", nil, true, function(v) mbShowFovCircle = v; updateFov(); updateLockBB() end)
+    toggleMagic("未锁定不穿透", nil, true, function(v) mbOnlyWhenLocked = v end)
+
+    local MODE_NAMES = { [1]="准星最近（FOV内）", [2]="距离最近（FOV内）", [3]="360° 距离最近" }
+    local modeBtn = TabMagic:Button({
+        Title = "锁定模式: " .. MODE_NAMES[mbTargetMode],
+        Callback = function(self)
+            mbTargetMode = mbTargetMode % 3 + 1
+            cachedTarget = nil; lastFindTick = 0; destroyLockBB()
+            self:SetTitle("锁定模式: " .. MODE_NAMES[mbTargetMode])
+            self:SetColor(mbTargetMode == 3 and Color3.fromRGB(160,60,60) or mbTargetMode == 2 and Color3.fromRGB(150,110,50) or Color3.fromRGB(60,60,100))
+            updateFov(); wasTooLarge = false
+        end,
+    })
+    autoFireBtn = TabMagic:Button({
+        Title = "自动开火: 关（需开掩体检测）",
+        Callback = function(self)
+            if not magicBulletEnabled then autoFireStatus = "请先开魔法子弹"; return end
+            if not mbRequireVisible then autoFireStatus = "请先开掩体检测"; return end
+            autoFireEnabled = not autoFireEnabled
+            self:SetTitle(autoFireEnabled and "自动开火: 开" or "自动开火: 关（需开掩体检测）")
+            self:SetColor(autoFireEnabled and Color3.fromRGB(0,150,0) or Color3.fromRGB(70,70,70))
+            if autoFireEnabled then scanConnsFresh(); autoFireStatus = "启动中"
+            else releaseFire(); releaseFire(); autoFireStatus = "关" end
+        end,
+    })
+    local radiusBtn = TabMagic:Button({
+        Title = "半径显示: 关",
+        Callback = function(self)
+            mbShowRadiusCircle = not mbShowRadiusCircle
+            self:SetTitle(mbShowRadiusCircle and "半径显示: 开" or "半径显示: 关")
+            self:SetColor(mbShowRadiusCircle and Color3.fromRGB(0,130,0) or Color3.fromRGB(70,70,70))
+            if not mbShowRadiusCircle then destroyAllRadius() end
+        end,
+    })
+    local radiusModeBtn = TabMagic:Button({
+        Title = "半径模式: 线",
+        Callback = function(self)
+            radiusMode = (radiusMode == "line") and "face" or "line"
+            self:SetTitle(radiusMode == "line" and "半径模式: 线" or "半径模式: 面")
+            destroyAllRadius()
+        end,
+    })
+    TabMagic:Input({
+        Title = "最大距离 (10-50000)",
+        Value = tostring(mbWorldDistMax),
+        Callback = function(v)
+            local n = tonumber(v)
+            if n and n >= 10 and n <= 50000 then mbWorldDistMax = n; cachedTarget = nil; lastFindTick = 0 end
+        end,
+    })
+    TabMagic:Button({ Title = "最大距离 50", Callback = function() mbWorldDistMax=50; cachedTarget=nil; lastFindTick=0 end })
+    TabMagic:Button({ Title = "最大距离 200", Callback = function() mbWorldDistMax=200; cachedTarget=nil; lastFindTick=0 end })
+
+    local AIM_LABELS = {"头部","躯干","左臂","右臂","左腿","右腿"}
+    TabMagic:Dropdown({
+        Title = "锁定部位",
+        Values = AIM_LABELS,
+        Value = AIM_LABELS[1],
+        Multi = false,
+        AllowNone = false,
+        Callback = function(v)
+            for i, lbl in ipairs(AIM_LABELS) do if lbl == v then mbAimPartIndex = i; break end end
+            destroyLockBB()
+        end,
+    })
+    TabMagic:Input({
+        Title = "FOV 半径 (20-800)",
+        Value = tostring(mbFovRadius),
+        Callback = function(v) local n=tonumber(v); if n and n>=20 and n<=800 then mbFovRadius=n; updateFov() end end,
+    })
+    TabMagic:Input({
+        Title = "锁定框大小 (0.5-5)",
+        Value = tostring(mbBBSizeStuds),
+        Callback = function(v)
+            local n = tonumber(v)
+            if n and n >= 0.5 and n <= 5 then mbBBSizeStuds = n; if lockBB and lockBB.Parent then lockBB.Size = UDim2.new(n,0,n,0) end end
+        end,
+    })
+
+    do
+        local ev = ReplicatedStorage:FindFirstChild("Events")
+        local qteIn = ev and ev:FindFirstChild("QTEInput")
+        local qteFb = ev and ev:FindFirstChild("QTEFeedback")
+        if qteIn then qteIn.OnClientEvent:Connect(function() qteLockUntil = tick() + 3 end) end
+        if qteFb then qteFb.OnClientEvent:Connect(function() qteLockUntil = math.max(qteLockUntil, tick() + 0.3) end) end
+    end
+
+    local lastFire, inFiring = 0, false
+    RunService.Heartbeat:Connect(function()
+        if not autoFireEnabled then if inFiring then releaseFire(); inFiring=false end; return end
+        if not magicBulletEnabled then if inFiring then releaseFire(); inFiring=false end; autoFireStatus="需先开魔法子弹"; return end
+        if not mbRequireVisible then if inFiring then releaseFire(); inFiring=false end; autoFireStatus="需开启掩体检测"; return end
+        if tick() < qteLockUntil then if inFiring then releaseFire(); inFiring=false end; autoFireStatus="QTE中"; return end
+        local target = findTarget()
+        local reloadFlag = isReloading()
+        local inReloadState = (reloadFlag == true) or reloadWindowActive or tick() < reloadPauseUntil
+        local isEmergency = false
+        if inReloadState then
+            if tick() < emergencyCooldownUntil then
+                if inFiring then releaseFire(); inFiring=false end
+                autoFireStatus = "紧急冷却"; return
+            end
+            if target then
+                local tool = getTool(); local curClip = getClip()
+                local maxClip = tool and clipMaxByTool[tool.Name] or nil
+                local nearDone = false
+                if curClip and curClip > 0 and maxClip and maxClip > 0 then
+                    if curClip >= maxClip - 1 or curClip >= maxClip * EMERGENCY_SKIP_RATIO then nearDone = true end
+                end
+                if nearDone then
+                    if inFiring then releaseFire(); inFiring=false end
+                    autoFireStatus = "换弹快完成(跳过紧急)"; emergencyCooldownUntil = 0; return
+                end
+                isEmergency = true
+                emergencyCooldownUntil = tick() + 0.5
+                reloadWindowActive = false; reloadWindowEnd = 0; reloadPauseUntil = 0
+            else
+                if inFiring then releaseFire(); inFiring=false end
+                autoFireStatus = "装填中"; return
+            end
+        end
+        if not target then if inFiring then releaseFire(); inFiring=false end; autoFireStatus="无锁定目标"; return end
+        if isLowPriority(target.model) then if inFiring then releaseFire(); inFiring=false end; autoFireStatus="低优先目标(不自动)"; return end
+        local now = tick(); if now - lastFire < 0.1 then return end
+        lastFire = now; inFiring = true
+        local ok, reason = doFireOnce(isEmergency)
+        autoFireStatus = reason
+        if ok then fireCount = fireCount + 1 end
+    end)
+
+    UserInputService.InputBegan:Connect(function(input, gpe)
+        if gpe or not autoFireEnabled then return end
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        if input.KeyCode == Enum.KeyCode.R then
+            reloadPauseUntil = math.max(reloadPauseUntil, tick() + 0.3)
+            reloadWindowActive = true; reloadWindowEnd = tick() + 6
+        end
+    end)
+
+    local lockBBFrame = 0
+    RunService.RenderStepped:Connect(function()
+        lockBBFrame = lockBBFrame + 1
+        if lockBBFrame % 3 ~= 0 then return end
+        updateLockBB(); updateRadiusDisplay()
+    end)
+
+    lp.CharacterAdded:Connect(function() destroyAllRadius(); wasTooLarge = false end)
+
+    table.insert(cleanupFns, function()
+        autoFireEnabled = false
+        releaseFire(); releaseFire()
+        uninstallHook(); destroyFov(); destroyLockBB(); destroyAllRadius()
+    end)
+end
+
+-- ============================================
+-- 模块 18: 雷达
+-- ============================================
+do
+    local rpEnabled, rpUseHeartbeat, rpShowArrow = false, true, true
+    local RP_SAMPLE_INTERVAL, RP_RADIUS_IN, RP_RADIUS_OUT = 0.03, 150, 200
+    local RP_LAYER_THRESHOLD, RP_DIFF_LAYER_TRANSPARENCY, RP_EDGE_FADE = 4, 0.65, 1.25
+    local RP_MAP_RADIUS, RP_ARROW_DIST = 0.43, 8
+    local rpRadarRadius = RP_RADIUS_OUT
+    local rpCacheInside, rpCacheInsideTick = false, 0
+    local rpCacheRotLocked, rpCacheRotLockedTick = false, 0
+    local rpDotPool = {}
+    local function rpGetMC()
+        local pg = lp:FindFirstChild("PlayerGui"); if not pg then return nil end
+        local mm = pg:FindFirstChild("Minimap"); if not mm then return nil end
+        return mm:FindFirstChild("MinimapContainer")
+    end
+    local function rpGetHighlights()
+        local mc = rpGetMC()
+        local core = mc and mc:FindFirstChild("Core")
+        return core and core:FindFirstChild("Highlights")
+    end
+    local function rpIsInsideFacilityCached(p)
+        local now = tick(); if now - rpCacheInsideTick < 3 then return rpCacheInside end
+        rpCacheInsideTick = now
+        local mmd = Workspace:FindFirstChild("MinimapData")
+        local fiv = mmd and mmd:FindFirstChild("FacilityInteriorVolumes")
+        if not fiv then rpCacheInside = false; return false end
+        for _, part in ipairs(fiv:GetDescendants()) do
+            if part:IsA("BasePart") then
+                local rel = part.CFrame:PointToObjectSpace(p)
+                local half = part.Size * 0.5
+                if math.abs(rel.X) <= half.X and math.abs(rel.Z) <= half.Z then rpCacheInside = true; return true end
+            end
+        end
+        rpCacheInside = false; return false
+    end
+    local function rpIsRotLockedCached()
+        local now = tick(); if now - rpCacheRotLockedTick < 3 then return rpCacheRotLocked end
+        rpCacheRotLockedTick = now
+        local cs = lp:FindFirstChild("ClientSettings")
+        local g = cs and cs:FindFirstChild("Game")
+        rpCacheRotLocked = (g and g:GetAttribute("MinimapRotationLocked") == true) or false
+        return rpCacheRotLocked
+    end
+    local function rpGetHeading()
+        local cam = Workspace.CurrentCamera; if not cam then return Vector2.new(0,-1) end
+        local l = cam.CFrame.LookVector
+        local h = Vector2.new(l.X, l.Z)
+        if h.Magnitude > 0.001 then return h.Unit end
+        return Vector2.new(0,-1)
+    end
+    local function rpCollectEnemies()
+        local list = {}
+        for _, fn in ipairs(AI_CONTAINERS) do
+            local folder = Workspace:FindFirstChild(fn)
+            if folder then
+                for _, model in ipairs(folder:GetChildren()) do
+                    if model:IsA("Model") then
+                        local hum = model:FindFirstChildOfClass("Humanoid")
+                        local hrp = model:FindFirstChild("HumanoidRootPart")
+                        if hum and hrp and hum.Health > 0 and not _playerChars[model] then
+                            local n = model.Name; local c
+                            if n=="SIN" or n=="Chimera" or n=="Gilbert" or n=="Mikhail" or n=="Leaper" then c = Color3.fromRGB(170,0,255)
+                            elseif n=="RIF Miniboss" or n=="Dave" or n=="CombatEngineer" or n=="Vorax" then c = Color3.fromRGB(255,140,0)
+                            else c = Color3.fromRGB(255,0,0) end
+                            list[#list+1] = { pos=hrp.Position, color=c, hrp=hrp }
+                        end
+                    end
+                end
+            end
+        end
+        local map = Workspace:FindFirstChild("Map")
+        local btr = map and map:FindFirstChild("BTR-82 (BOSS)")
+        if btr then
+            local root = btr:FindFirstChild("BTRRoot")
+            local pos = (root and root:IsA("BasePart") and root.Position) or (btr.PrimaryPart and btr.PrimaryPart.Position)
+            if pos then list[#list+1] = { pos=pos, color=Color3.fromRGB(170,0,255), hrp=root } end
+        end
+        local drone = Workspace:FindFirstChild("BTRDrone")
+        if drone then
+            local hit = drone:FindFirstChild("DroneHitbox")
+            local pos = (hit and hit:IsA("BasePart") and hit.Position) or (drone.PrimaryPart and drone.PrimaryPart.Position)
+            if pos then list[#list+1] = { pos=pos, color=Color3.fromRGB(255,80,200), hrp=hit } end
+        end
+        return list
+    end
+    local function rpCalcPos(tp, pp, heading)
+        local dx, dz = tp.X - pp.X, tp.Z - pp.Z
+        local distWorld = math.sqrt(dx*dx + dz*dz)
+        if distWorld > rpRadarRadius * RP_EDGE_FADE then return nil, false end
+        local dxz = Vector2.new(dx, dz)
+        local rot = Vector2.new(-heading.Y, heading.X)
+        local proj = Vector2.new(dxz:Dot(rot), -dxz:Dot(heading)) * (RP_MAP_RADIUS / rpRadarRadius)
+        local mag = proj.Magnitude
+        local clamped = false
+        if mag > RP_MAP_RADIUS then proj = proj.Unit * RP_MAP_RADIUS; clamped = true end
+        return UDim2.fromScale(0.5 + proj.X, 0.5 + proj.Y), clamped
+    end
+    local function rpCalcArrowScreenVec(eHrp, heading)
+        if not eHrp then return 0, -1 end
+        local lv = eHrp.CFrame.LookVector
+        local lvx, lvz = lv.X, lv.Z
+        local hx, hz = heading.X, heading.Y
+        local sx = lvx * (-hz) + lvz * hx
+        local sy = -(lvx * hx + lvz * hz)
+        local m = math.sqrt(sx*sx + sy*sy)
+        if m < 1e-4 then return 0, -1 end
+        return sx/m, sy/m
+    end
+    local function rpEnsureDot(hl, i)
+        if rpDotPool[i] and rpDotPool[i].Parent then return rpDotPool[i] end
+        local d = Instance.new("Frame")
+        d.Name="SPRadar_Enemy"; d.Size=UDim2.new(0,7,0,7); d.AnchorPoint=Vector2.new(0.5,0.5)
+        d.BorderSizePixel=0; d.ZIndex=50
+        Instance.new("UICorner", d).CornerRadius = UDim.new(1,0)
+        local s = Instance.new("UIStroke", d)
+        s.Name="Outline"; s.Thickness=1; s.Transparency=0.2; s.Color=Color3.fromRGB(0,0,0)
+        local core = Instance.new("Frame", d)
+        core.Name="Core"; core.Size=UDim2.new(0.4,0,0.4,0); core.AnchorPoint=Vector2.new(0.5,0.5)
+        core.Position=UDim2.new(0.5,0,0.5,0); core.BackgroundColor3=Color3.fromRGB(255,255,255)
+        core.BackgroundTransparency=0.5; core.BorderSizePixel=0
+        Instance.new("UICorner", core).CornerRadius = UDim.new(1,0)
+        local ar = Instance.new("TextLabel", d)
+        ar.Name="ArrowLabel"; ar.Size=UDim2.new(0,10,0,10); ar.AnchorPoint=Vector2.new(0.5,0.5)
+        ar.Position=UDim2.new(0.5,0,0.5,0); ar.BackgroundTransparency=1
+        ar.Text="▲"; ar.TextColor3=Color3.fromRGB(255,255,255); ar.TextStrokeTransparency=0.3
+        ar.TextStrokeColor3=Color3.fromRGB(0,0,0); ar.Font=Enum.Font.GothamBold; ar.TextSize=12
+        ar.Rotation=0; ar.ZIndex=51; ar.Visible=true
+        d.Parent = hl; rpDotPool[i] = d; return d
+    end
+    local function rpClearDots()
+        for _, d in pairs(rpDotPool) do if d and d.Parent then pcall(function() d:Destroy() end) end end
+        rpDotPool = {}
+    end
+    local function rpUpdateOnce()
+        local hl = rpGetHighlights(); if not hl then return end
+        local char = lp.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+        local ppos = hrp.Position
+        rpRadarRadius = rpIsInsideFacilityCached(ppos) and RP_RADIUS_IN or RP_RADIUS_OUT
+        local locked = rpIsRotLockedCached()
+        local heading = locked and Vector2.new(0,-1) or rpGetHeading()
+        local enemies = rpCollectEnemies()
+        for i, e in ipairs(enemies) do
+            local dot = rpEnsureDot(hl, i)
+            local pos, clamped = rpCalcPos(e.pos, ppos, heading)
+            local dy = math.abs(e.pos.Y - ppos.Y)
+            local isSameLayer = dy <= RP_LAYER_THRESHOLD
+            local ar = dot:FindFirstChild("ArrowLabel")
+            if ar then
+                if rpShowArrow then
+                    local sx, sy = rpCalcArrowScreenVec(e.hrp, heading)
+                    ar.Position = UDim2.new(0.5, sx*RP_ARROW_DIST, 0.5, sy*RP_ARROW_DIST)
+                    ar.Rotation = math.deg(math.atan2(sy, sx)) + 90
+                    if not ar.Visible then ar.Visible = true end
+                    if ar.TextColor3 ~= e.color then ar.TextColor3 = e.color end
+                    local at = isSameLayer and 0 or RP_DIFF_LAYER_TRANSPARENCY
+                    if clamped then at = math.max(at, 0.35) end
+                    if ar.TextTransparency ~= at then ar.TextTransparency = at end
+                else if ar.Visible then ar.Visible = false end end
+            end
+            if pos then
+                dot.Position = pos
+                if not dot.Visible then dot.Visible = true end
+                if dot.BackgroundColor3 ~= e.color then dot.BackgroundColor3 = e.color end
+                local ws = clamped and UDim2.new(0,5,0,5) or UDim2.new(0,7,0,7)
+                if dot.Size ~= ws then dot.Size = ws end
+                local wt = isSameLayer and (clamped and 0.35 or 0) or RP_DIFF_LAYER_TRANSPARENCY
+                if dot.BackgroundTransparency ~= wt then dot.BackgroundTransparency = wt end
+            else if dot.Visible then dot.Visible = false end end
+        end
+        for i = #rpDotPool, #enemies + 1, -1 do
+            local d = rpDotPool[i]
+            if d and d.Parent and d.Visible then d.Visible = false end
+        end
+    end
+    local rpLastHB = 0
+    RunService.Heartbeat:Connect(function()
+        if not rpEnabled or not rpUseHeartbeat then return end
+        local now = tick(); if now - rpLastHB < RP_SAMPLE_INTERVAL then return end
+        rpLastHB = now; pcall(rpUpdateOnce)
+    end)
+    spawn(function()
+        while tipGui.Parent do
+            if rpEnabled and not rpUseHeartbeat then pcall(rpUpdateOnce); wait(RP_SAMPLE_INTERVAL)
+            else wait(0.05) end
+        end
+    end)
+
+    toggleRadar("启用（雷达探敌）", nil, false, function(v) rpEnabled = v; if not v then rpClearDots() end end)
+    toggleRadar("高刷新率（可能卡顿）", nil, true, function(v) rpUseHeartbeat = v end)
+    toggleRadar("显示敌人朝向箭头", nil, true, function(v)
+        rpShowArrow = v
+        if not v then
+            for _, d in pairs(rpDotPool) do
+                if d and d.Parent then local ar = d:FindFirstChild("ArrowLabel"); if ar then ar.Visible = false end end
+            end
+        end
+    end)
+
+    -- 信号增幅器
+    local rbZoneBackup, rbScriptBackup, rbMainLoop, rbBoostLabel = {}, {}, nil, nil
+    local RB_LABEL_GAP, RB_FONT_SCALE = 18, 1.15
+    local RB_NORMAL_VISIBLE = {"Player","FieldOfView","Area","Coords","Core","Glow","MapState","TeamBuffLabel"}
+    local RB_FORCE_HIDE = {"BrokenScreenOverlay","NoSignalOverlay","InterferanceIndicator"}
+    local function rbGetZones()
+        local mdata = Workspace:FindFirstChild("MinimapData")
+        return mdata and mdata:FindFirstChild("NoSignalZones")
+    end
+    local function rbRestoreZones()
+        for part, props in pairs(rbZoneBackup) do
+            pcall(function()
+                if part and part.Parent then
+                    part.Size=props.Size; part.CFrame=props.CFrame
+                    part.CanTouch=props.CanTouch; part.CanCollide=props.CanCollide
+                end
+            end)
+        end
+        rbZoneBackup = {}
+    end
+    local function rbDisableFadeScripts()
+        local mc = rpGetMC(); if not mc then return end
+        for _, d in ipairs(mc:GetDescendants()) do
+            if (d:IsA("LocalScript") or d:IsA("BaseScript")) and d:FindFirstAncestor("NoSignalOverlay") then
+                if not d.Disabled then pcall(function() d.Disabled = true end); rbScriptBackup[d] = true end
+            end
+        end
+    end
+    local function rbRestoreScripts()
+        for d in pairs(rbScriptBackup) do pcall(function() d.Disabled = false end) end
+        rbScriptBackup = {}
+    end
+    local function rbFixMinimapUI()
+        local mc = rpGetMC(); if not mc then return end
+        for _, name in ipairs(RB_NORMAL_VISIBLE) do
+            local el = mc:FindFirstChild(name)
+            if el and el:IsA("GuiObject") and not el.Visible then pcall(function() el.Visible = true end) end
+        end
+        for _, name in ipairs(RB_FORCE_HIDE) do
+            local el = mc:FindFirstChild(name)
+            if el and el:IsA("GuiObject") and el.Visible then pcall(function() el.Visible = false end) end
+        end
+    end
+    local function rbShowLabel()
+        local mc = rpGetMC(); if not mc then return end
+        if rbBoostLabel and rbBoostLabel.Parent == mc then return end
+        local areaEl = mc:FindFirstChild("Area")
+        local coordsEl = mc:FindFirstChild("Coords")
+        if not areaEl or not areaEl:IsA("TextLabel") or not coordsEl then return end
+        local lbl = areaEl:Clone()
+        lbl.Name = "SignalBoosterLabel"; lbl.Text = "信号增幅器已启用"
+        lbl.Visible = true; lbl.RichText = false
+        local pos = coordsEl.Position; local sz = coordsEl.Size
+        lbl.Position = UDim2.new(pos.X.Scale, pos.X.Offset, pos.Y.Scale, pos.Y.Offset + sz.Y.Offset + RB_LABEL_GAP)
+        lbl.Parent = mc; rbBoostLabel = lbl
+    end
+    local function rbHideLabel()
+        if rbBoostLabel then pcall(function() rbBoostLabel:Destroy() end); rbBoostLabel = nil end
+    end
+    local function rbStartLoop()
+        if rbMainLoop then pcall(function() rbMainLoop:Disconnect() end); rbMainLoop = nil end
+        rbMainLoop = spawn(function()
+            while radarBoostEnabled do
+                local zones = rbGetZones()
+                if zones then
+                    for _, z in ipairs(zones:GetDescendants()) do
+                        if z:IsA("BasePart") and z.Size.X > 0.01 then
+                            if not rbZoneBackup[z] then rbZoneBackup[z] = {Size=z.Size, CFrame=z.CFrame, CanTouch=z.CanTouch, CanCollide=z.CanCollide} end
+                            pcall(function()
+                                z.Size=Vector3.new(0.001,0.001,0.001)
+                                z.CFrame=CFrame.new(99999,99999,99999); z.CanTouch=false
+                            end)
+                        end
+                    end
+                end
+                rbFixMinimapUI()
+                if not rbBoostLabel or not rbBoostLabel.Parent then rbShowLabel() end
+                wait(0.1)
+            end
+            rbMainLoop = nil
+        end)
+    end
+    local function rbSetup()
+        if radarBoostEnabled then rbDisableFadeScripts(); rbFixMinimapUI(); rbShowLabel(); rbStartLoop()
+        else
+            if rbMainLoop then pcall(function() rbMainLoop:Disconnect() end); rbMainLoop = nil end
+            rbRestoreZones(); rbRestoreScripts(); rbHideLabel()
+        end
+    end
+    toggleRadar("雷达信号增幅器", nil, false, function(v) radarBoostEnabled = v; rbSetup() end)
+
+    table.insert(cleanupFns, function()
+        rpEnabled = false; rpClearDots()
+        radarBoostEnabled = false
+        if rbMainLoop then pcall(function() rbMainLoop:Disconnect() end) end
+        rbRestoreZones(); rbRestoreScripts(); rbHideLabel()
+    end)
+end
+
+-- ============================================
+-- 设置 Tab
+-- ============================================
+local themeList = {}
+for name, _ in pairs(WindUI:GetThemes()) do table.insert(themeList, name) end
+TabSet:Dropdown({
+    Title = "UI 主题",
+    Values = themeList,
+    Multi = false, AllowNone = false,
+    Callback = function(v) WindUI:SetTheme(v) end,
+})
+
+-- ============================================
+-- 卸载
+-- ============================================
+local function unload()
+    infStaminaEnabled = false; espEnabled = false; headHitboxEnabled = false
+    autoInteractEnabled = false; forceResetEnabled = false
+    slideEnabled = false; slideSteerEnabled = false; nvgEnabled = false
+    elephantImmuneEnabled = false; radarBoostEnabled = false
+    recoilEnabled = false; muzzleEnabled = false
+    magicBulletEnabled = false; forceHeadshotEnabled = false
+    chatForceEnabled = false; autoQTEEnabled = false
+    shotgunNoPumpEnabled = false; shieldFixEnabled = false
+    shieldVMEnabled = false; noCDEnabled = false
+    noCDActiveUntil = 0
+    wait(0.7)
+    for _, fn in ipairs(cleanupFns) do pcall(fn) end
+    cleanupFns = {}
+    pcall(function() StarterGui:SetCore("ResetButtonCallback", false) end)
+    if tipGui then pcall(function() tipGui:Destroy() end) end
+    _G.ExamRadiusTip = nil
+    for _, n in ipairs({"ExamRadiusRing", "ExamRadiusFace"}) do
+        for _, d in ipairs(Workspace:GetChildren()) do
+            if d.Name == n then pcall(function() d:Destroy() end) end
+        end
+    end
+    pcall(function() Window:Destroy() end)
+    print("[Exam] WindUI 版已卸载")
+end
+TabSet:Button({ Title = "完全卸载", Callback = unload })
+
+print("[Exam] WindUI 版已加载")
