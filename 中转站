@@ -1,0 +1,35 @@
+--!nocheck
+-- 专属游戏自动加载器 (考试主源码)
+
+-- 你的目标游戏 ID
+local TARGET_PLACE_ID = 8360569918
+local TARGET_GAME_ID  = 8360569918 -- 兼容 UniverseId 检测
+
+-- 你的远程脚本链接 (已解码)
+local SCRIPT_URL = "https://raw.githubusercontent.com/jgft616/FPE/refs/heads/main/%E8%80%83%E8%AF%95%E4%B8%BB%E6%BA%90%E7%A0%81"
+
+-- 检测当前游戏 ID 是否匹配
+if game.PlaceId == TARGET_PLACE_ID or game.GameId == TARGET_GAME_ID then
+    -- 使用 pcall 包裹，防止拉取脚本失败导致执行器卡死
+    local success, err = pcall(function()
+        -- 拉取脚本内容
+        local source = game:HttpGet(SCRIPT_URL)
+        
+        -- 编译并执行
+        local func = loadstring(source)
+        if func then
+            func()
+        else
+            error("脚本编译失败，可能是源码有语法错误")
+        end
+    end)
+    
+    if success then
+        print("[自动加载] 考试主源码 已成功执行！")
+    else
+        warn("[自动加载] 执行失败: " .. tostring(err))
+    end
+else
+    -- 如果不是目标游戏，打印一下当前 ID，方便你调试
+    print(string.format("[自动加载] 当前游戏 ID (%d) 不匹配，跳过执行。", game.PlaceId))
+end
